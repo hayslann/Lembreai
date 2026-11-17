@@ -88,19 +88,19 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   final input = TextEditingController();
+  final nameInput = TextEditingController();
   final messages = <(bool, String)>[
     (false, 'Olá! 🤖 Sou o LembreAI. Digite: Me lembra amanhã às 14:30 de pagar o boleto.')
   ];
   final reminders = <Reminder>[];
   String name = '';
   bool loaded = false;
-  bool registrationOpen = false;
   bool sending = false;
   int page = 0;
   @override
   void initState() { super.initState(); load(); }
   @override
-  void dispose() { input.dispose(); super.dispose(); }
+  void dispose() { input.dispose(); nameInput.dispose(); super.dispose(); }
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString('reminders');
@@ -173,40 +173,52 @@ class _MainScreenState extends State<MainScreen> {
       '${d.hour.toString().padLeft(2,'0')}:${d.minute.toString().padLeft(2,'0')}';
 
   Future<void> register() async {
-    if (registrationOpen || !mounted || name.isNotEmpty) return;
-    registrationOpen = true;
-    final controller = TextEditingController();
-    final answer = await showDialog<String>(
-      context: context, barrierDismissible: false,
-      builder: (c) => AlertDialog(
-        title: const Text('Bem-vindo ao LembreAI 🤖'),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Text('Seus lembretes ficam neste aparelho. A conexão com uma assistente online será ativada quando o servidor estiver configurado.'),
-          TextField(controller: controller,
-            decoration: const InputDecoration(labelText: 'Seu nome')),
-          const SizedBox(height: 12),
-          const Text('Este aplicativo armazena seus lembretes neste aparelho. Você pode criar até dez compromissos ativos.'),
-        ]),
-        actions: [FilledButton(onPressed: () {
-          if (controller.text.trim().isNotEmpty) Navigator.pop(c, controller.text.trim());
-        }, child: const Text('Começar'))],
-      ),
-    );
-    controller.dispose();
-    registrationOpen = false;
-    if (!mounted || answer == null) return;
-    final p = await SharedPreferences.getInstance();
-    await p.setString('name', answer);
-    if (mounted) setState(() => name = answer);
+    final entered = nameInput.text.trim();
+    if (entered.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('name', entered);
+    if (mounted) setState(() => name = entered);
   }
 
   @override
   Widget build(BuildContext context) {
     if (!loaded) return const Scaffold(body: Center(child: CircularProgressIndicator()));
     if (name.isEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && name.isEmpty) register();
-      });
+      return Scaffold(body: SafeArea(child: Center(child: SingleChildScrollView(
+        child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 440),
+          child: Padding(padding: const EdgeInsets.all(24),
+            child: Column(mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Center(child: Text('🤖', style: TextStyle(fontSize: 76))),
+                const SizedBox(height: 12),
+                Text('Bem-vindo ao LembreAI',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.headlineMedium),
+                const SizedBox(height: 14),
+                const Text(
+                  'Sua assistente pessoal para organizar compromissos e '
+                  'lembrar do que é importante.',
+                  textAlign: TextAlign.center),
+                const SizedBox(height: 24),
+                TextField(
+                  controller: nameInput,
+                  textCapitalization: TextCapitalization.words,
+                  decoration: const InputDecoration(labelText: 'Seu nome completo',
+                    border: OutlineInputBorder()),
+                  onSubmitted: (_) => register(),
+                ),
+                const SizedBox(height: 16),
+                const Text('Seus compromissos são salvos neste celular. '
+                  'A conversa com inteligência artificial online será '
+                  'ativada quando o servidor estiver configurado.'),
+                const SizedBox(height: 20),
+                FilledButton(onPressed: register, child: const Text('Começar')),
+              ],
+            ),
+          ),
+        ),
+      ))));
     }
     return Scaffold(
       appBar: AppBar(title: const Text('🤖 LembreAI'),
