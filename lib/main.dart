@@ -11,6 +11,8 @@ import 'package:flutter_timezone/flutter_timezone.dart';
 import 'reminder_parser.dart';
 import 'assistant_service.dart';
 import 'alert_preferences.dart';
+import 'plan_catalog.dart';
+import 'legal_text.dart';
 
 final alarms = FlutterLocalNotificationsPlugin();
 
@@ -203,6 +205,9 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   final input = TextEditingController();
   final nameInput = TextEditingController();
+  final chatScroll = ScrollController();
+  bool termsAccepted = false;
+  bool termsChecked = false;
   Uint8List? attachedPhoto;
   String? attachedMime;
   String? attachedName;
@@ -219,7 +224,7 @@ class _MainScreenState extends State<MainScreen> {
   @override
   void initState() { super.initState(); load(); }
   @override
-  void dispose() { input.dispose(); nameInput.dispose(); super.dispose(); }
+  void dispose() { input.dispose(); nameInput.dispose(); chatScroll.dispose(); super.dispose(); }
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString('reminders');
@@ -241,9 +246,32 @@ class _MainScreenState extends State<MainScreen> {
         // O aplicativo continua abrindo, mesmo que Android negue alarmes.
       }
     }
-    // Servidor Gemini definido no aplicativo. O cliente não digita nenhuma URL.
+    // Conversas ficam apenas no aparelho; imagens nunca são persistidas no chat.
+    try {
+      final stored = prefs.getString('chat_history');
+      if (stored != null) {
+        final items = jsonDecode(stored) as List;
+        final restored = <(bool,String)>[];
+        for (final item in items.take(120)) {
+          if (item is! Map) continue;
+          if (item['text'] is! String || item['mine'] is! bool) continue;
+          restored.add((item['mine'] as bool, (item['text'] as String).substring(
+            0, (item['text'] as String).length.clamp(0, 2500).toInt())));
+        }
+        if (restored.isNotEmpty) {
+          messages..clear()..addAll(restored);
+        }
+      }
+    } catch (_) { /* Histórico corrompido não impede a abertura. */ }
     if (!mounted) return;
-    setState(() { name = prefs.getString('name') ?? ''; loaded = true; });
+    setState(() {
+      name = prefs.getString('name') ?? '';
+      nameInput.text = name;
+      termsAccepted = prefs.getString('terms_accepted_version') == termsVersion;
+      loaded = true;
+    });
+    scrollToLatest();
+
   }
   Future<void> save() async {
     final prefs = await SharedPreferences.getInstance();
@@ -288,9 +316,130 @@ class _MainScreenState extends State<MainScreen> {
     ) ?? false;
   }
 
-  void bot(String text) {
-    if (mounted) setState(() => messages.add((false, text)));
+  void scrollToLatest() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !chatScroll.hasClients) return;
+      chatScroll.animateTo(
+        chatScroll.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+      );
+    });
   }
+
+  Future<void> persistMessages() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final entries = messages.length > 120
+          ? messages.sublist(messages.length - 120) : messages;
+      await prefs.setString('chat_history', jsonEncode([
+        for (final msg in entries)
+          {'mine': msg.$1, 'text': msg.$2.length > 2500
+              ? msg.$2.substring(0, 2500) : msg.$2}
+      ]));
+    } catch (_) { /* Salvar chat é opcional; lembretes continuam funcionando. */ }
+  }
+
+  void bot(String text) {
+    if (mounted) {
+      setState(() => messages.add((false, text)));
+      scrollToLatest();
+      persistMessages();
+    }
+  }
+
+  Future<void> showDocument(String title, String body) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(title),
+        content: SizedBox(width: 540, child: SingleChildScrollView(
+          child: SelectableText(body))),
+        actions: [
+          TextButton(onPressed: ()=>Navigator.pop(dialogContext),
+            child: const Text('Fechar')),
+        ],
+      ),
+    );
+  }
+
+  void showPlans() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16,8,16,18),
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              const Text('Planos LembreAI',style:TextStyle(
+                fontSize:22,fontWeight:FontWeight.bold)),
+              const SizedBox(height:8),
+              const Text('Você usa o plano gratuito. Os valores abaixo são '
+                'propostas; assinaturas e cobranças ainda não estão ativas.'),
+              const SizedBox(height:12),
+              for (final plan in plans)
+                Card(child: ListTile(
+                  leading: Icon(plan.available
+                    ? Icons.check_circle_outline : Icons.lock_outline),
+                  title: Text(plan.name+' — '+plan.monthlyPrice),
+                  subtitle: Text(plan.activeLimit.toString()+
+                    ' lembretes ativos'+
+                    (plan.available?' • disponível':' • em preparação')),
+                )),
+              const SizedBox(height:8),
+              const Text('Os avisos não são garantidos em situações de '
+                'bateria descarregada, falta de permissão ou restrições do Android.'),
+              const SizedBox(height:8),
+              TextButton(onPressed:()=>Navigator.pop(sheetContext),
+                child:const Text('Voltar')),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> showPreferences() async {
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(mainAxisSize:MainAxisSize.min,children:[
+          const Text('Privacidade e dados',style:TextStyle(
+            fontSize:20,fontWeight:FontWeight.bold)),
+          ListTile(leading:const Icon(Icons.description_outlined),
+            title:const Text('Termos de uso'),
+            onTap:()=>showDocument('Termos de uso',appTerms)),
+          ListTile(leading:const Icon(Icons.privacy_tip_outlined),
+            title:const Text('Como seus dados são tratados'),
+            onTap:()=>showDocument('Privacidade',privacySummary)),
+          ListTile(leading:const Icon(Icons.delete_outline),
+            title:const Text('Apagar histórico de conversa'),
+            subtitle:const Text('Apaga apenas mensagens deste aparelho.'),
+            onTap:() async {
+              final ok=await askConfirmation('Limpar conversa?',
+                'O histórico salvo no aparelho será apagado. Os lembretes '
+                'cadastrados continuarão na Agenda.');
+              if (!ok) return;
+              final prefs=await SharedPreferences.getInstance();
+              await prefs.remove('chat_history');
+              if (mounted) setState(() {
+                messages..clear()..add((false,'Oi! Sou o LembreAI 💜'));
+              });
+              if (sheetContext.mounted) Navigator.pop(sheetContext);
+            }),
+          const SizedBox(height:8),
+        ]),
+      )));
+  }
+
 
   Future<bool> authorizeOnlineAI() async {
     if (!AssistantService.isAvailable) return false;
@@ -430,6 +579,8 @@ class _MainScreenState extends State<MainScreen> {
       messages.add((true,message+(photo==null ? '' : '\n📷 Foto anexada')));
       attachedPhoto=null;attachedMime=null;attachedName=null;
     });
+    scrollToLatest();
+    persistMessages();
     try {
       final now=DateTime.now();
       AssistantResponse? online;
@@ -489,7 +640,7 @@ class _MainScreenState extends State<MainScreen> {
         bot('Esses compromissos já estão cadastrados ou não têm data futura válida.');
         return;
       }
-      final slots=10-reminders.where((r)=>!r.done).length;
+      final slots=freeActiveReminderLimit-reminders.where((r)=>!r.done).length;
       if (unique.length>slots) {
         bot('Encontrei '+unique.length.toString()+' compromissos, mas restam apenas '
           +slots.toString()+' vagas no plano gratuito. Conclua lembretes antigos antes de importar.');
@@ -542,10 +693,22 @@ class _MainScreenState extends State<MainScreen> {
 
   Future<void> register() async {
     final entered = nameInput.text.trim();
-    if (entered.isEmpty) return;
+    if (entered.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content:Text('Digite seu nome para continuar.')));
+      return;
+    }
+    if (!termsChecked) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content:Text('Leia e aceite os Termos de uso.')));
+      return;
+    }
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('name', entered);
-    if (mounted) setState(() => name = entered);
+    await prefs.setString('terms_accepted_version', termsVersion);
+    await prefs.setString('terms_accepted_at',
+        DateTime.now().toUtc().toIso8601String());
+    if (mounted) setState(() {name = entered; termsAccepted=true;});
   }
 
   Future<void> testNotificationSound() async {
@@ -615,7 +778,7 @@ class _MainScreenState extends State<MainScreen> {
   @override
   Widget build(BuildContext context) {
     if (!loaded) return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    if (name.isEmpty) {
+    if (name.isEmpty || !termsAccepted) {
       return Scaffold(body: SafeArea(child: Center(child: SingleChildScrollView(
         child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 440),
           child: Padding(padding: const EdgeInsets.all(24),
@@ -644,7 +807,25 @@ class _MainScreenState extends State<MainScreen> {
                 const Text('Seus compromissos são salvos neste celular. '
                   'O Gemini já vem integrado ao aplicativo. '
                   'Na primeira conversa, você poderá autorizar o uso da IA online.'),
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
+                Wrap(spacing:8,children:[
+                  TextButton(onPressed:()=>showDocument(
+                    'Termos de uso',appTerms),
+                    child:const Text('Ler termos')),
+                  TextButton(onPressed:()=>showDocument(
+                    'Privacidade',privacySummary),
+                    child:const Text('Privacidade')),
+                ]),
+                CheckboxListTile(
+                  contentPadding:EdgeInsets.zero,
+                  value:termsChecked,
+                  title:const Text('Li e aceito os Termos de uso da versão beta.'),
+                  subtitle:const Text('O uso da IA online será autorizado '
+                    'separadamente, quando necessário.'),
+                  onChanged:(v)=>setState(()=>termsChecked=v==true),
+                  controlAffinity:ListTileControlAffinity.leading,
+                ),
+                const SizedBox(height: 16),
                 FilledButton(onPressed: register, child: const Text('Começar')),
               ],
             ),
@@ -655,6 +836,12 @@ class _MainScreenState extends State<MainScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('LembreAI'),
         actions: [
+          IconButton(onPressed: showPlans,
+            tooltip: 'Planos e limites',
+            icon: const Icon(Icons.workspace_premium_outlined)),
+          IconButton(onPressed: showPreferences,
+            tooltip: 'Privacidade e preferências',
+            icon: const Icon(Icons.settings_outlined)),
           IconButton(onPressed: checkAiStatus,
             tooltip: 'Testar conversa com IA',
             icon: const Icon(Icons.health_and_safety_outlined)),
@@ -663,6 +850,7 @@ class _MainScreenState extends State<MainScreen> {
         ]),
       body: page == 0 ? Column(children: [
         Expanded(child: ListView.builder(
+          controller:chatScroll,
           padding: const EdgeInsets.all(16), itemCount: messages.length,
           itemBuilder: (context, i) {
             final msg = messages[i];
