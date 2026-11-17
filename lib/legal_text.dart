@@ -29,7 +29,7 @@ const privacySummary='''PRIVACIDADE — LembreAI (versão beta)
 • IA online opcional: quando autorizada, sua mensagem, até oito mensagens recentes, os lembretes cadastrados e fotos que você escolher poderão ser enviados à Cloudflare e ao Gemini.
 • As imagens não são guardadas no histórico local do chat; apenas a indicação de anexo.
 • Não vendemos dados pessoais.
-• Anúncios e contas sincronizadas ainda não estão ativados.
+• Anúncios de demonstração do Google podem ser exibidos se você optar por visualizá-los; não geram receita e não são personalizados. O SDK de anúncios pode processar dados técnicos do dispositivo. Contas sincronizadas ainda não estão ativadas.
 • Você pode limpar o histórico do chat no aplicativo. Desinstalar o aplicativo pode apagar compromissos salvos no aparelho.
 
 Este resumo não substitui a política de privacidade completa, com responsável pelo tratamento, contato, bases legais, retenção, direitos e operadores. Essa política completa deve ser disponibilizada antes da publicação comercial.''';
