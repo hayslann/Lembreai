@@ -133,29 +133,63 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> {
+class _SplashScreenState extends State<SplashScreen>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController animation;
   @override
   void initState() {
     super.initState();
-    Future.delayed(const Duration(milliseconds: 1700), () {
+    animation = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1100),
+    )..forward();
+    Future.delayed(const Duration(milliseconds: 2100), () {
       if (mounted) Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const MainScreen()));
     });
   }
 
   @override
-  Widget build(BuildContext context) => const Scaffold(
-    backgroundColor: Color(0xff130829),
-    body: Center(child: Padding(
-      padding: EdgeInsets.all(32),
-      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        BrandLogo(size: 280),
-        SizedBox(height: 24),
-        Text('Sua memória, sempre com você.',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: Colors.white70,fontSize:17)),
-      ]),
-    )),
+  void dispose() {
+    animation.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    backgroundColor: const Color(0xfffaf7ff),
+    body: SafeArea(
+      child: Center(
+        child: AnimatedBuilder(
+          animation: animation,
+          builder: (context, child) => Opacity(
+            opacity: Curves.easeOut.transform(animation.value),
+            child: Transform.scale(
+              scale: 0.91 + 0.09 * Curves.easeOut.transform(animation.value),
+              child: child,
+            ),
+          ),
+          child: const Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              BrandLogo(size: 280),
+              SizedBox(height: 16),
+              Text(
+                'Sua IA para lembrar do que importa.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Color(0xff431263),
+                  fontSize: 17,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              SizedBox(height: 32),
+              CircularProgressIndicator(color: Color(0xff7915d6)),
+            ],
+          ),
+        ),
+      ),
+    ),
   );
 }
 
@@ -564,7 +598,7 @@ class _MainScreenState extends State<MainScreen> {
         title: Text(response != null ? 'Inteligência artificial ativa' :
             'Conexão indisponível'),
         content: Text(response != null
-            ? 'O LembreAI conversou com o Gemini com sucesso.\\n\\n'
+            ? 'O LembreAI conversou com o Gemini com sucesso.\n\n'
                 '${response.reply.isEmpty ? 'Oi! Estou pronta para ajudar.' : response.reply}'
             : health
                 ? 'O servidor respondeu, mas o Gemini não concluiu o teste. '
