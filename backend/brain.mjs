@@ -79,7 +79,7 @@ export function normalizeSuggestedReminder(raw) {
   if (!raw || typeof raw!=='object' || Array.isArray(raw) ||
       typeof raw.title!=='string' || typeof raw.when!=='string') return null;
   const when=raw.when.length===16 ? raw.when+':00' : raw.when;
-  if (!/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}$/.test(when)) return null;
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(when)) return null;
   const [y,mo,d,h,mi,se]=[when.slice(0,4),when.slice(5,7),
     when.slice(8,10),when.slice(11,13),when.slice(14,16),when.slice(17,19)].map(Number);
   const check=new Date(Date.UTC(y,mo-1,d,h,mi,se));
