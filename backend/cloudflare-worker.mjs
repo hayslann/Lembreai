@@ -90,7 +90,7 @@ async function respondWithModel(data,env) {
             : m.text,
         }))],
       }),
-      signal:AbortSignal.timeout(23000),
+      signal:AbortSignal.timeout(36000),
     });
     if (!r.ok) throw new Error('OpenAI indisponível: '+r.status);
     const payload=await r.json();
@@ -118,7 +118,7 @@ async function respondWithModel(data,env) {
           temperature:0.2,responseMimeType:'application/json',
         },
       }),
-      signal:AbortSignal.timeout(23000),
+      signal:AbortSignal.timeout(36000),
     });
     if (!r.ok) throw new Error('Gemini indisponível: '+r.status);
     const payload=await r.json();
