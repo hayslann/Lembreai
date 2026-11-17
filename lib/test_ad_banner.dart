@@ -30,7 +30,9 @@ class _TestAdBannerState extends State<TestAdBanner> {
       ),
     );
     ad=banner;
-    banner.load();
+    MobileAds.instance.initialize().then((_) {
+      if(mounted && ad == banner) banner.load();
+    }).catchError((Object _) {});
   }
   @override
   void dispose(){ad?.dispose();super.dispose();}
