@@ -5,11 +5,11 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   android:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
@@ -65,3 +65,18 @@ jobs:
           path: build/app/outputs/flutter-apk/app-debug.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publicar APK de testes com link direto
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          cp build/app/outputs/flutter-apk/app-debug.apk LembreAI.apk
+          if gh release view teste-android >/dev/null 2>&1; then
+            gh release upload teste-android LembreAI.apk --clobber
+          else
+            gh release create teste-android LembreAI.apk \
+              --title "LembreAI — APK de testes" \
+              --notes "Versão básica de testes. Não é a versão publicada na Play Store." \
+              --prerelease --target "${GITHUB_SHA}"
+          fi
