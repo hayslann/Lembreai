@@ -257,7 +257,7 @@ class _MainScreenState extends State<MainScreen> {
       if (await authorizeOnlineAI()) {
         online = await AssistantService.ask(
           message, now,
-          history: messages.take(8).map((m) =>
+          history: messages.skip(messages.length > 8 ? messages.length - 8 : 0).map((m) =>
             {'role':m.$1 ? 'user' : 'assistant', 'text':m.$2}).toList(),
           reminders: reminders.map((r)=>r.toJson()).toList(),
         );
