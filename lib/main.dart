@@ -131,6 +131,7 @@ class _MainScreenState extends State<MainScreen> {
   String name = '';
   bool loaded = false;
   bool sending = false;
+  int selectedAdvanceMinutes = defaultAdvanceMinutes;
   int page = 0;
   @override
   void initState() { super.initState(); load(); }
@@ -145,6 +146,18 @@ class _MainScreenState extends State<MainScreen> {
             .map((e) => Reminder.fromJson(Map<String, dynamic>.from(e as Map))));
       }
     } catch (_) {}
+    // Migra os alertas antigos (1 dia/40 minutos) para a nova regra.
+    for (final r in reminders) {
+      try {
+        if (r.done || !r.when.isAfter(DateTime.now())) {
+          await cancelReminder(r);
+        } else {
+          await scheduleReminder(r);
+        }
+      } catch (_) {
+        // O aplicativo continua abrindo, mesmo que Android negue alarmes.
+      }
+    }
     AssistantService.setServerUrl(prefs.getString('ai_server_url') ?? '');
     if (!mounted) return;
     setState(() { name = prefs.getString('name') ?? ''; loaded = true; });
@@ -266,12 +279,16 @@ class _MainScreenState extends State<MainScreen> {
       );
       if (!confirmed) { bot('Tudo bem, mantive o compromisso anterior.'); return; }
       await cancelReminder(original);
-      final updated = Reminder(original.id, suggestion.title, suggestion.when);
+      final updated = Reminder(original.id, suggestion.title, suggestion.when,
+        advanceMinutes: original.advanceMinutes);
       setState(() => reminders[index] = updated);
       await save();
       try {
-        await scheduleReminder(updated);
-        bot('Compromisso atualizado para ' + formatted(updated.when) + '.');
+        final exact = await scheduleReminder(updated, requestPermissions: true);
+        bot('Compromisso atualizado para ' + formatted(updated.when) +
+          '. Aviso: ' + advanceLabel(updated.advanceMinutes).toLowerCase() +
+          ' e no horário.' + (exact ? '' :
+            ' O Android pode atrasar os alertas sem permissão de alarme preciso.'));
       } catch (_) {
         bot('Compromisso alterado, mas não consegui programar os avisos. '
             'Confira as permissões de notificação.');
@@ -332,15 +349,18 @@ class _MainScreenState extends State<MainScreen> {
         return;
       }
       final reminder = Reminder(
-        DateTime.now().millisecondsSinceEpoch % 100000000, title, when);
+        DateTime.now().millisecondsSinceEpoch % 100000000, title, when,
+        advanceMinutes: selectedAdvanceMinutes);
       setState(() => reminders.add(reminder));
       await save();
       try {
-        await scheduleReminder(reminder);
-        bot('Lembrete cadastrado: "' + title + '" para ' +
-            formatted(when) + '. Os avisos foram programados para '
-            'um dia antes, quarenta minutos antes e no horário '
-            'quando ainda estiverem no futuro.');
+        final exact = await scheduleReminder(reminder, requestPermissions: true);
+        bot('Lembrete salvo: "' + title + '" para ' + formatted(when) +
+          '. O celular foi configurado para avisar ' +
+          advanceLabel(reminder.advanceMinutes).toLowerCase() +
+          ' e no horário marcado.' +
+          (exact ? '' : ' Atenção: sem a permissão de alarmes precisos, '
+          'o Android pode atrasar o toque.'));
       } catch (_) {
         bot('Salvei o lembrete para ' + formatted(when) +
           ', mas não consegui programar os avisos. '
@@ -490,13 +510,38 @@ class _MainScreenState extends State<MainScreen> {
             );
           },
         )),
-        SafeArea(child: Padding(padding: const EdgeInsets.all(8), child: Row(children: [
-          Expanded(child: TextField(controller: input,
-            onSubmitted: (_) => send(),
-            decoration: const InputDecoration(
-              hintText: 'Digite seu lembrete...', border: OutlineInputBorder()))),
-          IconButton(onPressed: sending ? null : send, icon: const Icon(Icons.send)),
-        ]))),
+        SafeArea(child: Padding(padding: const EdgeInsets.all(8),
+          child: Column(mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              const Icon(Icons.notifications_active_outlined, size: 18),
+              const SizedBox(width: 8),
+              const Text('Aviso sonoro: '),
+              Expanded(child: DropdownButton<int>(
+                isExpanded: true,
+                value: selectedAdvanceMinutes,
+                items: [
+                  for (final minutes in availableAdvanceMinutes)
+                    DropdownMenuItem<int>(
+                      value: minutes, child: Text(advanceLabel(minutes),
+                      overflow: TextOverflow.ellipsis),
+                    ),
+                ],
+                onChanged: (value) {
+                  if (value != null) setState(() => selectedAdvanceMinutes = value);
+                },
+              )),
+            ]),
+            Row(children: [
+              Expanded(child: TextField(controller: input,
+                onSubmitted: (_) => send(),
+                decoration: const InputDecoration(
+                  hintText: 'Descreva seu compromisso...',
+                  border: OutlineInputBorder()))),
+              IconButton(onPressed: sending ? null : send,
+                icon: const Icon(Icons.send)),
+            ]),
+          ]))),
       ]) : ListView(children: [
         const ListTile(title: Text('Meus lembretes'),
           subtitle: Text('Você pode concluir um lembrete para liberar espaço.')),
@@ -504,12 +549,49 @@ class _MainScreenState extends State<MainScreen> {
           CheckboxListTile(
             value: r.done,
             title: Text(r.title),
-            subtitle: Text(formatted(r.when)),
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(formatted(r.when)),
+                DropdownButton<int>(
+                  value: r.advanceMinutes,
+                  isExpanded: true,
+                  items: [
+                    for (final minutes in availableAdvanceMinutes)
+                      DropdownMenuItem<int>(
+                        value: minutes, child: Text(
+                          advanceLabel(minutes), overflow: TextOverflow.ellipsis),
+                      ),
+                  ],
+                  onChanged: r.done ? null : (value) async {
+                    if (value == null || value == r.advanceMinutes) return;
+                    setState(() => r.advanceMinutes = value);
+                    await save();
+                    try {
+                      await scheduleReminder(r, requestPermissions: true);
+                    } catch (_) {
+                      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text(
+                          'Ajuste salvo, mas não foi possível programar o som. '
+                          'Verifique as permissões do celular.')));
+                    }
+                  },
+                ),
+              ],
+            ),
             onChanged: (value) async {
               setState(() => r.done = value ?? false);
               await save();
-              if (r.done) { await cancelReminder(r); }
-              else { await scheduleReminder(r); }
+              if (r.done) {
+                await cancelReminder(r);
+              } else {
+                try { await scheduleReminder(r, requestPermissions: true); }
+                catch (_) {
+                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Habilite as notificações e '
+                    'os alarmes para receber avisos sonoros.')));
+                }
+              }
             },
           ),
       ]),
