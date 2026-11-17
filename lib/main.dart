@@ -346,84 +346,161 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
-  Future<void> send() async {
-    final message = input.text.trim();
-    if (message.isEmpty || sending) return;
-    input.clear();
-    setState(() {
-      sending = true;
-      messages.add((true, message));
-    });
+
+  Future<void> addPhoto(ImageSource source) async {
+    if (sending) return;
     try {
-      final now = DateTime.now();
-      AssistantResponse? online;
-      if (await authorizeOnlineAI()) {
-        online = await AssistantService.ask(
-          message, now,
-          history: messages.skip(messages.length > 8 ? messages.length - 8 : 0).map((m) =>
-            {'role':m.$1 ? 'user' : 'assistant', 'text':m.$2}).toList(),
-          reminders: reminders.map((r)=>r.toJson()).toList(),
-        );
-      }
-      if (!mounted) return;
-      if (online != null) {
-        if (online.intent == 'list') { bot(upcomingSummary()); return; }
-        if (['update','cancel','complete'].contains(online.intent)) {
-          await handleExistingReminder(online);
-          return;
-        }
-        if (online.intent == 'chat' || online.intent == 'clarify') {
-          bot(online.reply.isNotEmpty ? online.reply :
-            'Você poderia explicar melhor o que deseja?');
-          return;
-        }
-      }
-      if (online == null && isListing(message)) {
-        bot(upcomingSummary());
+      final file=await picker.pickImage(
+        source:source,maxWidth:1600,imageQuality:72,requestFullMetadata:false);
+      if (file==null) return;
+      final bytes=await file.readAsBytes();
+      if (bytes.length>3*1024*1024) {
+        bot('Essa imagem é grande demais. Tente uma foto menor.');
         return;
       }
-      final local = online == null ? parseReminder(message, now) : null;
-      final suggested = online?.reminder;
-      final title = suggested?.title ?? local?.title;
-      final when = suggested?.when ?? local?.when;
-      if (title == null || when == null) {
-        bot(online?.reply.isNotEmpty == true ? online!.reply :
-          'Posso ajudar a organizar compromissos. Por exemplo: '
-          '"Me lembre amanhã às 14 horas de pagar a conta". '
-          'Preciso de data, horário e assunto para criar um lembrete.');
+      String? mime;
+      if (bytes.length>3 && bytes[0]==0xff && bytes[1]==0xd8) {
+        mime='image/jpeg';
+      } else if (bytes.length>4 && bytes[0]==137 &&
+          bytes[1]==80 && bytes[2]==78 && bytes[3]==71) {
+        mime='image/png';
+      } else if (bytes.length>12 &&
+          String.fromCharCodes(bytes.sublist(0,4))=='RIFF' &&
+          String.fromCharCodes(bytes.sublist(8,12))=='WEBP') {
+        mime='image/webp';
+      }
+      if (mime==null) {
+        bot('Envie uma imagem JPEG, PNG ou WebP.');
         return;
       }
-      if (reminders.where((r) => !r.done).length >= 10) {
-        bot('Você chegou ao limite gratuito de dez lembretes ativos. '
-            'Conclua um compromisso para cadastrar outro.');
-        return;
-      }
-      final reminder = Reminder(
-        DateTime.now().millisecondsSinceEpoch % 100000000, title, when,
-        advanceMinutes: selectedAdvanceMinutes);
-      setState(() => reminders.add(reminder));
-      await save();
-      try {
-        final exact = await scheduleReminder(reminder, requestPermissions: true);
-        bot('Lembrete salvo: "' + title + '" para ' + formatted(when) +
-          '. O celular foi configurado para avisar ' +
-          advanceLabel(reminder.advanceMinutes).toLowerCase() +
-          (reminder.advanceMinutes == 0
-            ? '.' : ' e no horário marcado.') +
-          (exact ? '' : ' Atenção: sem a permissão de alarmes precisos, '
-          'o Android pode atrasar o toque.'));
-      } catch (_) {
-        bot('Salvei o lembrete para ' + formatted(when) +
-          ', mas não consegui programar os avisos. '
-          'Confira as permissões de notificação.');
-      }
+      if (mounted) setState(() {
+        attachedPhoto=bytes;attachedMime=mime;attachedName=file.name;
+      });
     } catch (_) {
-      bot('Não consegui completar seu pedido agora. '
-        'Seus lembretes já cadastrados permanecem salvos.');
-    } finally {
-      if (mounted) setState(() => sending = false);
+      bot('Não consegui abrir a imagem. Verifique as permissões do celular.');
     }
   }
+
+  Future<void> send() async {
+    final typed=input.text.trim();
+    final photo=attachedPhoto;
+    final mime=attachedMime;
+    if ((typed.isEmpty && photo==null) || sending) return;
+    final message=typed.isEmpty
+      ? 'Analise esta imagem e extraia todos os eventos com assunto, data, hora e endereço.'
+      : typed;
+    input.clear();
+    setState(() {
+      sending=true;
+      messages.add((true,message+(photo==null ? '' : '\n📷 Foto anexada')));
+      attachedPhoto=null;attachedMime=null;attachedName=null;
+    });
+    try {
+      final now=DateTime.now();
+      AssistantResponse? online;
+      if (await authorizeOnlineAI()) {
+        online=await AssistantService.ask(message,now,
+          imageBase64:photo==null ? null : base64Encode(photo),
+          imageMimeType:mime,
+          history:messages.skip(messages.length>8 ? messages.length-8 : 0)
+            .map((m)=>{'role':m.$1 ? 'user' : 'assistant','text':m.$2}).toList(),
+          reminders:reminders.map((r)=>r.toJson()).toList());
+      }
+      if (!mounted) return;
+      if (online!=null) {
+        if (online.intent=='list') {bot(upcomingSummary());return;}
+        if (['update','cancel','complete'].contains(online.intent)) {
+          await handleExistingReminder(online);return;
+        }
+        if (online.intent=='chat' || online.intent=='clarify') {
+          bot(online.reply.isNotEmpty ? online.reply : 'Me conta um pouco mais?');
+          return;
+        }
+      } else if (photo!=null) {
+        bot('Recebi a foto, mas a inteligência artificial online ainda não respondeu. '
+          'Configure o endereço HTTPS da Cloudflare na engrenagem para eu poder ler a imagem.');
+        return;
+      } else if (isListing(message)) {
+        bot(upcomingSummary());return;
+      } else if (RegExp(r'^(oi|olá|ola|bom dia|boa tarde|boa noite|e aí|eai|tudo bem)[!?.\s]*$')
+          .hasMatch(message.toLowerCase().trim())) {
+        bot('Oi! 💜 Podemos conversar normalmente. Também posso te ajudar '
+          'com agenda, provas e compromissos.');
+        return;
+      }
+      final local=online==null ? parseReminder(message,now) : null;
+      final suggestions=<SuggestedReminder>[
+        if (online!=null && online.reminders.isNotEmpty) ...online.reminders,
+        if (online!=null && online.reminders.isEmpty && online.reminder!=null) online.reminder!,
+        if (online==null && local!=null) SuggestedReminder(local.title,local.when),
+      ];
+      if (suggestions.isEmpty) {
+        bot(online?.reply.isNotEmpty==true ? online!.reply :
+          AssistantService.isAvailable
+            ? 'O Gemini não respondeu agora. Tente novamente ou use um lembrete simples com data e horário.'
+            : 'Posso organizar sua agenda. Para conversa livre e interpretação de fotos '
+              'ou e-mails, primeiro conecte o Gemini nas configurações.');
+        return;
+      }
+      final unique=<SuggestedReminder>[];
+      for (final r in suggestions) {
+        if (r.when.isAfter(now) &&
+          !unique.any((x)=>x.title.toLowerCase()==r.title.toLowerCase() && x.when==r.when) &&
+          !reminders.any((x)=>!x.done && x.title.toLowerCase()==r.title.toLowerCase() && x.when==r.when)) {
+          unique.add(r);
+        }
+      }
+      if (unique.isEmpty) {
+        bot('Esses compromissos já estão cadastrados ou não têm data futura válida.');
+        return;
+      }
+      final slots=10-reminders.where((r)=>!r.done).length;
+      if (unique.length>slots) {
+        bot('Encontrei '+unique.length.toString()+' compromissos, mas restam apenas '
+          +slots.toString()+' vagas no plano gratuito. Conclua lembretes antigos antes de importar.');
+        return;
+      }
+      if (photo!=null || unique.length>1) {
+        final details=unique.map((r)=>'• '+r.title+'\n  '+formatted(r.when)+
+          (r.location.isEmpty ? '' : '\n  Local: '+r.location)).join('\n\n');
+        final ok=await askConfirmation(
+          'Agendar '+unique.length.toString()+' compromisso(s)?',
+          details+'\n\nOs avisos serão emitidos 30 minutos antes e no horário, por padrão.');
+        if (!ok) {bot('Tudo bem. Não criei nenhum compromisso.');return;}
+      }
+      final added=<Reminder>[];
+      final base=DateTime.now().microsecondsSinceEpoch.remainder(200000000);
+      for (var i=0;i<unique.length;i++) {
+        final r=unique[i];
+        added.add(Reminder(base+i,r.title,r.when,
+          location:r.location,
+          advanceMinutes:r.advanceMinutes ?? selectedAdvanceMinutes));
+      }
+      setState(()=>reminders.addAll(added));
+      await save();
+      final failures=<String>[];
+      for (final r in added) {
+        try {
+          await scheduleReminder(r,requestPermissions:true);
+        } catch (_) {failures.add(r.title);}
+      }
+      final report=added.map((r)=>'• '+r.title+'\n  '+formatted(r.when)+
+        (r.location.isEmpty ? '' : '\n  Local: '+r.location)+
+        '\n  Aviso: '+advanceLabel(r.advanceMinutes).toLowerCase()+
+        (r.advanceMinutes==0 ? '' : ' e no horário')).join('\n\n');
+      bot('✅ '+added.length.toString()+' compromisso(s) salvos na Agenda:\n\n'+report+
+        (failures.isNotEmpty
+          ? '\n\n⚠️ Falha ao programar os alarmes de: '+failures.join(', ')+
+            '. Confira as permissões do Android.'
+          : '\n\nPara os toques funcionarem, habilite notificações e alarmes precisos no Android.')+
+        (online?.reply.isNotEmpty==true ? '\n\n'+online!.reply : ''));
+    } catch (_) {
+      bot('Não consegui concluir a solicitação. Confira a Agenda antes de tentar novamente.');
+    } finally {
+      if (mounted) setState(()=>sending=false);
+    }
+  }
+
   String formatted(DateTime d) =>
       '${d.day.toString().padLeft(2,'0')}/${d.month.toString().padLeft(2,'0')} '
       '${d.hour.toString().padLeft(2,'0')}:${d.minute.toString().padLeft(2,'0')}';
@@ -615,11 +692,31 @@ class _MainScreenState extends State<MainScreen> {
                 },
               )),
             ]),
+            if (attachedPhoto!=null) Padding(
+              padding: const EdgeInsets.only(bottom:8),
+              child: Row(children: [
+                ClipRRect(borderRadius:BorderRadius.circular(8),
+                  child: Image.memory(attachedPhoto!,height:54,width:54,fit:BoxFit.cover)),
+                const SizedBox(width:10),
+                Expanded(child:Text(attachedName??'Foto anexada',
+                  maxLines:1,overflow:TextOverflow.ellipsis)),
+                IconButton(tooltip:'Remover foto',icon:const Icon(Icons.close),
+                  onPressed:()=>setState(() {
+                    attachedPhoto=null;attachedMime=null;attachedName=null;
+                  })),
+              ]),
+            ),
             Row(children: [
+              IconButton(tooltip:'Selecionar foto ou captura de tela',
+                icon:const Icon(Icons.add_photo_alternate_outlined),
+                onPressed:sending ? null : ()=>addPhoto(ImageSource.gallery)),
+              IconButton(tooltip:'Fotografar agenda ou documento',
+                icon:const Icon(Icons.photo_camera_outlined),
+                onPressed:sending ? null : ()=>addPhoto(ImageSource.camera)),
               Expanded(child: TextField(controller: input,
                 onSubmitted: (_) => send(),
                 decoration: const InputDecoration(
-                  hintText: 'Descreva seu compromisso...',
+                  hintText: 'Converse, cole um e-mail ou envie uma foto...',
                   border: OutlineInputBorder()))),
               IconButton(onPressed: sending ? null : send,
                 icon: const Icon(Icons.send)),
