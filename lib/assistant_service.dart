@@ -21,7 +21,10 @@ class AssistantResponse {
 
 class AssistantService {
   // Nunca inclua chaves do Gemini/OpenAI no aplicativo.
-  static const compiledUrl = String.fromEnvironment('AI_SERVER_URL');
+  static const compiledUrl = String.fromEnvironment(
+    'AI_SERVER_URL',
+    defaultValue: 'https://lembreai-ia.hayslan08.workers.dev',
+  );
   static const devToken = String.fromEnvironment('LEMBREAI_DEV_TOKEN');
   static String _customUrl = '';
   static String get baseUrl => _customUrl.isNotEmpty ? _customUrl : compiledUrl;
