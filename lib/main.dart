@@ -206,7 +206,7 @@ class _MainScreenState extends State<MainScreen> {
         // O aplicativo continua abrindo, mesmo que Android negue alarmes.
       }
     }
-    AssistantService.setServerUrl(prefs.getString('ai_server_url') ?? '');
+    // Servidor Gemini definido no aplicativo. O cliente não digita nenhuma URL.
     if (!mounted) return;
     setState(() { name = prefs.getString('name') ?? ''; loaded = true; });
   }
@@ -418,7 +418,7 @@ class _MainScreenState extends State<MainScreen> {
         }
       } else if (photo!=null) {
         bot('Recebi a foto, mas a inteligência artificial online ainda não respondeu. '
-          'Configure o endereço HTTPS da Cloudflare na engrenagem para eu poder ler a imagem.');
+          'Verifique sua internet e tente novamente. O servidor já vem configurado no aplicativo.');
         return;
       } else if (isListing(message)) {
         bot(upcomingSummary());return;
@@ -439,7 +439,7 @@ class _MainScreenState extends State<MainScreen> {
           AssistantService.isAvailable
             ? 'O Gemini não respondeu agora. Tente novamente ou use um lembrete simples com data e horário.'
             : 'Posso organizar sua agenda. Para conversa livre e interpretação de fotos '
-              'ou e-mails, primeiro conecte o Gemini nas configurações.');
+              'ou e-mails, é necessária uma conexão com a internet.');
         return;
       }
       final unique=<SuggestedReminder>[];
@@ -545,67 +545,36 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
-  Future<void> configureAi() async {
-    final prefs = await SharedPreferences.getInstance();
-    final current = prefs.getString('ai_server_url') ?? '';
-    final controller = TextEditingController(text: current);
+  /// Diagnóstico rápido para o cliente, sem URLs e sem expor credenciais.
+  Future<void> checkAiStatus() async {
+    if (sending) return;
+    if (!await authorizeOnlineAI()) return;
     if (!mounted) return;
-    final answer = await showDialog<String>(
+    setState(() => sending = true);
+    final health = await AssistantService.checkConnection();
+    final response = health
+        ? await AssistantService.ask('Oi, tudo bem? Responda brevemente em português.',
+            DateTime.now())
+        : null;
+    if (!mounted) return;
+    setState(() => sending = false);
+    await showDialog<void>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Conectar inteligência artificial'),
-        content: SingleChildScrollView(
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            const Text(
-              'Cole o endereço HTTPS fornecido pela Cloudflare Workers. '
-              'A chave secreta do Gemini fica somente no servidor, '
-              'nunca neste aplicativo.'),
-            const SizedBox(height: 16),
-            TextField(
-              controller: controller,
-              keyboardType: TextInputType.url,
-              autocorrect: false,
-              decoration: const InputDecoration(
-                labelText: 'Endereço HTTPS do servidor',
-                hintText: 'https://lembreai-ia.exemplo.workers.dev',
-                border: OutlineInputBorder()),
-            ),
-            const SizedBox(height: 12),
-            const Text('Para desativar a conexão online, apague o endereço '
-              'e toque em Salvar.'),
-          ]),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Voltar')),
-          FilledButton(onPressed: () =>
-            Navigator.pop(dialogContext,controller.text.trim()),
-            child: const Text('Salvar')),
-        ],
+        title: Text(response != null ? 'Inteligência artificial ativa' :
+            'Conexão indisponível'),
+        content: Text(response != null
+            ? 'O LembreAI conversou com o Gemini com sucesso.\\n\\n'
+                '${response.reply.isEmpty ? 'Oi! Estou pronta para ajudar.' : response.reply}'
+            : health
+                ? 'O servidor respondeu, mas o Gemini não concluiu o teste. '
+                  'Tente novamente mais tarde.'
+                : 'Não conseguimos acessar o servidor agora. Confira sua internet e tente novamente.'),
+        actions: [TextButton(
+          onPressed: () => Navigator.pop(dialogContext),
+          child: const Text('Entendi'))],
       ),
     );
-    controller.dispose();
-    if (answer == null || !mounted) return;
-    final uri = Uri.tryParse(answer);
-    if (answer.isNotEmpty && (uri?.scheme != 'https' || uri?.host.isEmpty == true)) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Informe um endereço HTTPS válido.')));
-      return;
-    }
-    if (answer != current) await prefs.setBool('online_ai_consent', false);
-    await prefs.setString('ai_server_url', answer);
-    AssistantService.setServerUrl(answer);
-    final connected = answer.isNotEmpty &&
-      await AssistantService.checkConnection();
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(answer.isEmpty
-        ? 'Inteligência artificial online desativada.'
-        : connected
-          ? 'Servidor encontrado. Faça uma pergunta para testar o Gemini.'
-          : 'Endereço salvo, mas o servidor ainda não respondeu. '
-            'Confira a publicação na Cloudflare.'),
-    ));
   }
 
   @override
@@ -638,8 +607,8 @@ class _MainScreenState extends State<MainScreen> {
                 ),
                 const SizedBox(height: 16),
                 const Text('Seus compromissos são salvos neste celular. '
-                  'A conversa com inteligência artificial online será '
-                  'ativada quando o servidor estiver configurado.'),
+                  'O Gemini já vem integrado ao aplicativo. '
+                  'Na primeira conversa, você poderá autorizar o uso da IA online.'),
                 const SizedBox(height: 20),
                 FilledButton(onPressed: register, child: const Text('Começar')),
               ],
@@ -649,11 +618,11 @@ class _MainScreenState extends State<MainScreen> {
       ))));
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('🤖 LembreAI'),
+      appBar: AppBar(title: const Text('LembreAI'),
         actions: [
-          IconButton(onPressed: configureAi,
-            tooltip: 'Conectar inteligência artificial',
-            icon: const Icon(Icons.settings)),
+          IconButton(onPressed: checkAiStatus,
+            tooltip: 'Testar conversa com IA',
+            icon: const Icon(Icons.health_and_safety_outlined)),
           Padding(padding: const EdgeInsets.all(12),
             child: Center(child: Text(name))),
         ]),
