@@ -18,7 +18,7 @@ const response=await fetch(endpoint+'/chat',{
     history:[],
     reminders:[],
   }),
-  signal:AbortSignal.timeout(33000),
+  signal:AbortSignal.timeout(65000),
 });
 if (!response.ok) {
   const error=await response.json().catch(()=>({}));
