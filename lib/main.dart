@@ -268,7 +268,7 @@ class _MainScreenState extends State<MainScreen> {
         title: const Text('Usar inteligência artificial online?'),
         content: const Text(
           'Para compreender mensagens e compromissos, o aplicativo enviará '
-          'sua mensagem, parte da conversa e os lembretes cadastrados para '
+          'sua mensagem, fotos anexadas, parte da conversa e os lembretes cadastrados para '
           'o servidor e o provedor de inteligência artificial configurado. '
           'Você pode continuar usando lembretes básicos sem ativar isso.'),
         actions: [
