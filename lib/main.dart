@@ -129,7 +129,7 @@ class _MainScreenState extends State<MainScreen> {
       setState(() => messages.add((false, 'Limite gratuito: 10 lembretes ativos.')));
       return;
     }
-    final reminder = Reminder(DateTime.now().millisecondsSinceEpoch ~/ 1000,
+    final reminder = Reminder(DateTime.now().millisecondsSinceEpoch % 100000000,
         parsed.title, parsed.when);
     setState(() {
       reminders.add(reminder);
