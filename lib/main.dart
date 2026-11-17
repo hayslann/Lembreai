@@ -6,6 +6,7 @@ import 'package:timezone/data/latest.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'reminder_parser.dart';
+import 'assistant_service.dart';
 
 final alarms = FlutterLocalNotificationsPlugin();
 
@@ -93,6 +94,8 @@ class _MainScreenState extends State<MainScreen> {
   final reminders = <Reminder>[];
   String name = '';
   bool loaded = false;
+  bool registrationOpen = false;
+  bool sending = false;
   int page = 0;
   @override
   void initState() { super.initState(); load(); }
@@ -115,32 +118,54 @@ class _MainScreenState extends State<MainScreen> {
     await prefs.setString('reminders', jsonEncode(reminders.map((e)=>e.toJson()).toList()));
   }
   Future<void> send() async {
-    final text = input.text.trim();
-    if (text.isEmpty) return;
+    final message = input.text.trim();
+    if (message.isEmpty || sending) return;
     input.clear();
-    setState(() => messages.add((true, text)));
-    final parsed = parseReminder(text, DateTime.now());
-    if (parsed == null) {
-      setState(() => messages.add((false,
-          'Não entendi a data. Experimente: "Me lembra amanhã às 14:30 de pagar o boleto".')));
-      return;
-    }
-    if (reminders.where((r) => !r.done).length >= 10) {
-      setState(() => messages.add((false, 'Limite gratuito: 10 lembretes ativos.')));
-      return;
-    }
-    final reminder = Reminder(DateTime.now().millisecondsSinceEpoch % 100000000,
-        parsed.title, parsed.when);
     setState(() {
-      reminders.add(reminder);
-      messages.add((false,
-          'Combinado! ✅ ${parsed.title} em ${formatted(parsed.when)}. Vou programar os avisos.'));
+      sending = true;
+      messages.add((true, message));
     });
-    await save();
-    try { await scheduleReminder(reminder); }
-    catch (_) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Não foi possível ativar os avisos. Verifique as permissões.')));
+    try {
+      final now = DateTime.now();
+      final local = parseReminder(message, now);
+      final online = await AssistantService.ask(message, now);
+      if (!mounted) return;
+      DateTime? when = online?.reminder?.when ?? local?.when;
+      String? title = online?.reminder?.title ?? local?.title;
+      if (when == null || title == null) {
+        setState(() => messages.add((false,
+          online?.reply.isNotEmpty == true
+            ? online!.reply
+            : 'Posso ajudar a organizar seus compromissos. Escreva, por exemplo: '
+              '"Lembre-me amanhã às 14 horas de pagar a conta". '
+              'Para criar um lembrete, preciso saber a data, o horário e o assunto.')));
+        return;
+      }
+      if (reminders.where((r) => !r.done).length >= 10) {
+        setState(() => messages.add((false,
+          'Você atingiu o limite de dez lembretes ativos. '
+          'Marque um compromisso como concluído para cadastrar outro.')));
+        return;
+      }
+      final reminder = Reminder(
+        DateTime.now().millisecondsSinceEpoch % 100000000, title, when);
+      setState(() => reminders.add(reminder));
+      await save();
+      bool notified = true;
+      try { await scheduleReminder(reminder); }
+      catch (_) { notified = false; }
+      if (!mounted) return;
+      setState(() => messages.add((false,
+        notified
+          ? 'Pronto! Seu lembrete "' + title! + '" foi salvo para '
+            + formatted(when) + '. O aplicativo programou avisos para '
+              'um dia antes, quarenta minutos antes e no horário, '
+              'quando esses horários ainda estiverem no futuro.'
+          : 'Salvei "' + title! + '" para ' + formatted(when)
+            + ', mas não consegui ativar as notificações. '
+              'Verifique as permissões do aplicativo no celular.')));
+    } finally {
+      if (mounted) setState(() => sending = false);
     }
   }
   String formatted(DateTime d) =>
@@ -148,17 +173,19 @@ class _MainScreenState extends State<MainScreen> {
       '${d.hour.toString().padLeft(2,'0')}:${d.minute.toString().padLeft(2,'0')}';
 
   Future<void> register() async {
+    if (registrationOpen || !mounted || name.isNotEmpty) return;
+    registrationOpen = true;
     final controller = TextEditingController();
     final answer = await showDialog<String>(
       context: context, barrierDismissible: false,
       builder: (c) => AlertDialog(
         title: const Text('Bem-vindo ao LembreAI 🤖'),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Text('Seus lembretes ficam neste aparelho. Esta é uma versão de testes, sem conta Google ou IA online.'),
+          const Text('Seus lembretes ficam neste aparelho. A conexão com uma assistente online será ativada quando o servidor estiver configurado.'),
           TextField(controller: controller,
             decoration: const InputDecoration(labelText: 'Seu nome')),
           const SizedBox(height: 12),
-          const Text('Ao continuar, você concorda em testar o aplicativo e permitir o armazenamento local dos lembretes.'),
+          const Text('Este aplicativo armazena seus lembretes neste aparelho. Você pode criar até dez compromissos ativos.'),
         ]),
         actions: [FilledButton(onPressed: () {
           if (controller.text.trim().isNotEmpty) Navigator.pop(c, controller.text.trim());
@@ -166,7 +193,8 @@ class _MainScreenState extends State<MainScreen> {
       ),
     );
     controller.dispose();
-    if (answer == null) return;
+    registrationOpen = false;
+    if (!mounted || answer == null) return;
     final p = await SharedPreferences.getInstance();
     await p.setString('name', answer);
     if (mounted) setState(() => name = answer);
@@ -202,7 +230,7 @@ class _MainScreenState extends State<MainScreen> {
             onSubmitted: (_) => send(),
             decoration: const InputDecoration(
               hintText: 'Digite seu lembrete...', border: OutlineInputBorder()))),
-          IconButton(onPressed: send, icon: const Icon(Icons.send)),
+          IconButton(onPressed: sending ? null : send, icon: const Icon(Icons.send)),
         ]))),
       ]) : ListView(children: [
         const ListTile(title: Text('Meus lembretes'),
