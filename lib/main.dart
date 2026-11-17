@@ -14,6 +14,7 @@ import 'alert_preferences.dart';
 import 'plan_catalog.dart';
 import 'legal_text.dart';
 import 'account_screen.dart';
+import 'test_ad_banner.dart';
 
 final alarms = FlutterLocalNotificationsPlugin();
 
@@ -209,6 +210,7 @@ class _MainScreenState extends State<MainScreen> {
   final chatScroll = ScrollController();
   bool termsAccepted = false;
   bool termsChecked = false;
+  bool consentTestAds = false;
   Uint8List? attachedPhoto;
   String? attachedMime;
   String? attachedName;
@@ -269,6 +271,7 @@ class _MainScreenState extends State<MainScreen> {
       name = prefs.getString('name') ?? '';
       nameInput.text = name;
       termsAccepted = prefs.getString('terms_accepted_version') == termsVersion;
+      consentTestAds = prefs.getBool('show_test_ads') == true;
       loaded = true;
     });
     scrollToLatest();
@@ -707,6 +710,7 @@ class _MainScreenState extends State<MainScreen> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('name', entered);
     await prefs.setString('terms_accepted_version', termsVersion);
+    await prefs.setBool('show_test_ads', consentTestAds);
     await prefs.setString('terms_accepted_at',
         DateTime.now().toUtc().toIso8601String());
     if (mounted) setState(() {name = entered; termsAccepted=true;});
@@ -826,6 +830,15 @@ class _MainScreenState extends State<MainScreen> {
                   onChanged:(v)=>setState(()=>termsChecked=v==true),
                   controlAffinity:ListTileControlAffinity.leading,
                 ),
+                CheckboxListTile(
+                  contentPadding:EdgeInsets.zero,
+                  value:consentTestAds,
+                  title:const Text('Ver anúncios de teste na versão beta'),
+                  subtitle:const Text('Opcional. São anúncios de demonstração do Google, '
+                    'não remunerados e não personalizados.'),
+                  onChanged:(v)=>setState(()=>consentTestAds=v==true),
+                  controlAffinity:ListTileControlAffinity.leading,
+                ),
                 const SizedBox(height: 16),
                 FilledButton(onPressed: register, child: const Text('Começar')),
               ],
@@ -867,6 +880,7 @@ class _MainScreenState extends State<MainScreen> {
             );
           },
         )),
+        if(consentTestAds) const TestAdBanner(),
         SafeArea(child: Padding(padding: const EdgeInsets.all(8),
           child: Column(mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start, children: [
