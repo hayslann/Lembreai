@@ -110,6 +110,7 @@ class _MainScreenState extends State<MainScreen> {
             .map((e) => Reminder.fromJson(Map<String, dynamic>.from(e as Map))));
       }
     } catch (_) {}
+    AssistantService.setServerUrl(prefs.getString('ai_server_url') ?? '');
     if (!mounted) return;
     setState(() { name = prefs.getString('name') ?? ''; loaded = true; });
   }
@@ -329,6 +330,69 @@ class _MainScreenState extends State<MainScreen> {
     if (mounted) setState(() => name = entered);
   }
 
+  Future<void> configureAi() async {
+    final prefs = await SharedPreferences.getInstance();
+    final current = prefs.getString('ai_server_url') ?? '';
+    final controller = TextEditingController(text: current);
+    if (!mounted) return;
+    final answer = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Conectar inteligência artificial'),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Text(
+              'Cole o endereço HTTPS fornecido pela Cloudflare Workers. '
+              'A chave secreta do Gemini fica somente no servidor, '
+              'nunca neste aplicativo.'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.url,
+              autocorrect: false,
+              decoration: const InputDecoration(
+                labelText: 'Endereço HTTPS do servidor',
+                hintText: 'https://lembreai-ia.exemplo.workers.dev',
+                border: OutlineInputBorder()),
+            ),
+            const SizedBox(height: 12),
+            const Text('Para desativar a conexão online, apague o endereço '
+              'e toque em Salvar.'),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Voltar')),
+          FilledButton(onPressed: () =>
+            Navigator.pop(dialogContext,controller.text.trim()),
+            child: const Text('Salvar')),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (answer == null || !mounted) return;
+    final uri = Uri.tryParse(answer);
+    if (answer.isNotEmpty && (uri?.scheme != 'https' || uri?.host.isEmpty == true)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Informe um endereço HTTPS válido.')));
+      return;
+    }
+    if (answer != current) await prefs.setBool('online_ai_consent', false);
+    await prefs.setString('ai_server_url', answer);
+    AssistantService.setServerUrl(answer);
+    final connected = answer.isNotEmpty &&
+      await AssistantService.checkConnection();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(answer.isEmpty
+        ? 'Inteligência artificial online desativada.'
+        : connected
+          ? 'Servidor encontrado. Faça uma pergunta para testar o Gemini.'
+          : 'Endereço salvo, mas o servidor ainda não respondeu. '
+            'Confira a publicação na Cloudflare.'),
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
     if (!loaded) return const Scaffold(body: Center(child: CircularProgressIndicator()));
@@ -371,8 +435,13 @@ class _MainScreenState extends State<MainScreen> {
     }
     return Scaffold(
       appBar: AppBar(title: const Text('🤖 LembreAI'),
-        actions: [Padding(padding: const EdgeInsets.all(12),
-          child: Center(child: Text(name))) ]),
+        actions: [
+          IconButton(onPressed: configureAi,
+            tooltip: 'Conectar inteligência artificial',
+            icon: const Icon(Icons.settings)),
+          Padding(padding: const EdgeInsets.all(12),
+            child: Center(child: Text(name))),
+        ]),
       body: page == 0 ? Column(children: [
         Expanded(child: ListView.builder(
           padding: const EdgeInsets.all(16), itemCount: messages.length,
