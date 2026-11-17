@@ -38,6 +38,10 @@ jobs:
                 </intent-filter>
               </receiver>
             </application>''', 1)
+          # Sem backup automatico de texto e agenda em nuvem pelo Android.
+          s = s.replace('<application', '<application android:allowBackup="false"', 1)
+          # Apenas ID oficial de teste — nao veicula anuncios comerciais.
+          s = s.replace('</application>', '<meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="ca-app-pub-3940256099942544~3347511713" />\\n</application>', 1)
           p.write_text(s)
           # Usar o ícone oficial da marca em vez do logo Flutter padrão.
           brand_icon = Path('assets/branding/lembreai_logo.png').read_bytes()
