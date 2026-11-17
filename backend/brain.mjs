@@ -129,7 +129,7 @@ export function validateResponse(value,reminders=[]) {
 export function filteredImage(raw) {
   if (raw==null) return null;
   if (!raw || typeof raw!=='object' || !['image/jpeg','image/png','image/webp'].includes(raw.mimeType) ||
-      typeof raw.data!=='string' || raw.data.length===0 ||
+      typeof raw.data!=='string' || raw.data.length<8 ||
       raw.data.length>4_200_000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(raw.data) ||
       raw.data.length%4!==0) throw new Error('Imagem inválida');
   return {mimeType:raw.mimeType,data:raw.data};
