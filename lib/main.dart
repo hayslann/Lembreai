@@ -13,6 +13,7 @@ import 'assistant_service.dart';
 import 'alert_preferences.dart';
 import 'plan_catalog.dart';
 import 'legal_text.dart';
+import 'account_screen.dart';
 
 final alarms = FlutterLocalNotificationsPlugin();
 
@@ -836,6 +837,10 @@ class _MainScreenState extends State<MainScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('LembreAI'),
         actions: [
+          IconButton(onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const AccountScreen())),
+            tooltip: 'Minha conta',
+            icon: const Icon(Icons.person_outline)),
           IconButton(onPressed: showPlans,
             tooltip: 'Planos e limites',
             icon: const Icon(Icons.workspace_premium_outlined)),
