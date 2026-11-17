@@ -92,7 +92,7 @@ class AssistantService {
           if (imageBase64 != null && imageMimeType != null)
             'image':{'mimeType':imageMimeType,'data':imageBase64},
         }),
-      ).timeout(const Duration(seconds: 35));
+      ).timeout(const Duration(seconds: 55));
       if (response.statusCode != 200) return null;
       final data=jsonDecode(utf8.decode(response.bodyBytes));
       if (data is! Map) return null;
