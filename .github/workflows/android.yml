@@ -54,8 +54,8 @@ jobs:
           PY
       - name: Dependências
         run: flutter pub get
-      - name: Cinco testes
-        run: flutter test test/reminder_parser_test.dart
+      - name: Testar interpretação e avisos sonoros
+        run: flutter test test/reminder_parser_test.dart test/alert_preferences_test.dart
       - name: Testar entendimento e segurança da IA
         run: node --test backend/brain.test.mjs
       - name: Compilar APK
