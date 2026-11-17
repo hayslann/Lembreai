@@ -1,0 +1,27 @@
+name: Validar servidor Cloudflare e IA
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/cloudflare-check.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate-worker:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Conferir sintaxe
+        run: node --check backend/cloudflare-worker.mjs && node --check backend/server.mjs
+      - name: Testar 23 cenários de segurança e linguagem
+        run: node --test backend/brain.test.mjs backend/cloudflare-worker.test.mjs
+      - name: Validar pacote do Cloudflare Workers
+        working-directory: backend
+        run: |
+          npm install --no-audit --no-fund
+          npx wrangler deploy --dry-run
