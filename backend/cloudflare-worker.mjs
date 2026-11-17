@@ -177,7 +177,7 @@ export default {
       const message=err instanceof Error ? err.message : 'erro desconhecido';
       console.error('Erro no LembreAI '+stage+':',message);
       // Apenas codigo de diagnostico, nunca revela a chave nem o texto da resposta.
-      const providerCode=message.match(/(?:Gemini|OpenAI) indispon[ií]vel:\\s*(\\d{3})/);
+      const providerCode=message.match(/(?:Gemini|OpenAI) indispon[ií]vel:\s*(\d{3})/);
       const diagnostic=stage==='quota' ? 'quota_failed' :
         providerCode ? 'provider_http_'+providerCode[1] : 'provider_failed';
       return json({error:'A assistente está indisponível neste momento.',
