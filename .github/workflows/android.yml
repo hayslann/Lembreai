@@ -1,0 +1,52 @@
+name: Testar e gerar APK
+on:
+  push:
+    branches: [main, principal]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Gerar estrutura Android
+        run: flutter create --platforms=android --project-name=lembreai --org=app.lembreai .
+      - name: Configurar permissões de lembretes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('android/app/src/main/AndroidManifest.xml')
+          s=p.read_text()
+          s=s.replace('<application', '<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/><uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/><application', 1)
+          s=s.replace('</application>', '''<receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"/>
+              <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
+                <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED"/><action android:name="android.intent.action.MY_PACKAGE_REPLACED"/></intent-filter>
+              </receiver></application>''')
+          p.write_text(s)
+          p=Path('android/app/build.gradle.kts')
+          if p.exists():
+            s=p.read_text()
+            s=s.replace('android {', '''android {
+              compileOptions { isCoreLibraryDesugaringEnabled = true }
+              ''',1)
+            s=s.replace('dependencies {', '''dependencies {
+                coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+              ''',1) if 'dependencies {' in s else s+'\ndependencies { coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4") }\n'
+            p.write_text(s)
+          PY
+      - name: Instalar dependências
+        run: flutter pub get
+      - name: Executar cinco testes automatizados
+        run: flutter test test/reminder_parser_test.dart
+      - name: Compilar APK de testes
+        run: flutter build apk --debug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LembreAI-APK-teste
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          retention-days: 14
