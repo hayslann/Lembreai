@@ -166,15 +166,22 @@ export default {
     } catch (_) {
       return json({error:'Não foi possível interpretar sua mensagem.'},400);
     }
+    let stage='quota';
     try {
       const limited=await limitRequest(request,env);
       if (limited) return limited;
+      stage='model';
       const answer=await respondWithModel(data,env);
       return json(answer);
     } catch (err) {
-      console.error('Erro na solicitação de inteligência artificial:',
-        err instanceof Error ? err.message : 'erro desconhecido');
-      return json({error:'A assistente está indisponível neste momento.'},503);
+      const message=err instanceof Error ? err.message : 'erro desconhecido';
+      console.error('Erro no LembreAI '+stage+':',message);
+      // Apenas codigo de diagnostico, nunca revela a chave nem o texto da resposta.
+      const providerCode=message.match(/(?:Gemini|OpenAI) indispon[ií]vel:\\s*(\\d{3})/);
+      const diagnostic=stage==='quota' ? 'quota_failed' :
+        providerCode ? 'provider_http_'+providerCode[1] : 'provider_failed';
+      return json({error:'A assistente está indisponível neste momento.',
+        diagnostic},503);
     }
   },
 };
