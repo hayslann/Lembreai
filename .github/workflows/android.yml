@@ -4,6 +4,10 @@ on:
     branches: [main, principal]
   workflow_dispatch:
 
+concurrency:
+  group: lembreai-android-release-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
