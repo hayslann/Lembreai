@@ -50,3 +50,41 @@ ChatGPT e o faturamento da API OpenAI são independentes.
 - Não compartilhe chaves, tokens, dados pessoais ou boletos em repositórios públicos.
 - O GitHub Pages não executa esse servidor.
 - A compilação de APK não significa que o fluxo de autenticação e IA já esteja ativo.
+
+
+## Testar sua chave no Windows, sem colocá-la no APK
+
+No PowerShell, com Node.js instalado, baixe o repositório e execute:
+
+```powershell
+git clone https://github.com/hayslann/Lembreai.git
+cd Lembreai
+$env:GEMINI_API_KEY = Read-Host "Cole sua chave Gemini (ela fica apenas nesta sessão)"
+node backend/verificar-gemini.mjs
+```
+
+O teste faz exatamente a chamada REST `generateContent` demonstrada no
+exemplo de cURL, usando o cabeçalho `x-goog-api-key`. Se aparecer a resposta
+do Gemini, o acesso à API está confirmado. Você pode escolher o modelo com
+`$env:GEMINI_MODEL = "gemini-2.5-flash-lite"`.
+
+Para iniciar o servidor local do aplicativo nessa mesma sessão:
+
+```powershell
+$env:AI_PROVIDER = "gemini"
+node backend/server.mjs
+```
+
+Em outro terminal PowerShell, verifique apenas o funcionamento local:
+`Invoke-RestMethod http://127.0.0.1:8787/health`.
+
+**Isso ainda não conecta o APK instalado no celular.** É necessário publicar
+o servidor em um endereço HTTPS com autenticação por usuário, configurar a
+variável `LEMBREAI_AI_URL` no repositório e recompilar o aplicativo.
+Não use apenas um token embutido no aplicativo para autenticar usuários finais.
+
+No PowerShell, o `curl` de Bash (com `\\` e `$GEMINI_API_KEY`) pode não
+funcionar exatamente como aparece na documentação para Linux. Use o script
+`verificar-gemini.mjs` acima para testar com segurança.
+
+Não cole a chave no chat, em arquivos versionados ou em capturas de tela.
