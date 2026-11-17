@@ -93,7 +93,8 @@ Future<bool> scheduleReminder(Reminder r, {bool requestPermissions = false}) asy
       r.when, r.advanceMinutes, DateTime.now());
   for (final moment in moments) {
     await alarms.zonedSchedule(
-      r.id * 3 + moment.slot, '🔔 ' + r.title, moment.body,
+      r.id * 3 + moment.slot, '🔔 ' + r.title,
+      moment.body + (r.location.isEmpty ? '' : '\nLocal: ' + r.location),
       tz.TZDateTime.from(moment.when, tz.local),
       details,
       androidScheduleMode: exact
