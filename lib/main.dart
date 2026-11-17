@@ -117,6 +117,132 @@ class _MainScreenState extends State<MainScreen> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('reminders', jsonEncode(reminders.map((e)=>e.toJson()).toList()));
   }
+  String upcomingSummary() {
+    final upcoming = reminders.where((r) => !r.done)
+        .toList()..sort((a, b) => a.when.compareTo(b.when));
+    if (upcoming.isEmpty) {
+      return 'Você não tem lembretes ativos cadastrados neste aparelho.';
+    }
+    final rows = upcoming.take(10).map((r) =>
+        '• ' + r.title + ' — ' + formatted(r.when)).join('\n');
+    return 'Estes são seus lembretes ativos neste aparelho:\n' + rows;
+  }
+
+  bool isListing(String text) {
+    final t = text.toLowerCase();
+    return t.contains('meus lembretes') ||
+        t.contains('minha agenda') ||
+        t.contains('meus compromissos') ||
+        t.contains('o que tenho marcado') ||
+        t.contains('o que tenho agendado') ||
+        t.contains('quais lembretes');
+  }
+
+  Future<bool> askConfirmation(String title, String detail) async {
+    if (!mounted) return false;
+    return await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(title),
+        content: Text(detail),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Voltar')),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Confirmar')),
+        ],
+      ),
+    ) ?? false;
+  }
+
+  void bot(String text) {
+    if (mounted) setState(() => messages.add((false, text)));
+  }
+
+  Future<bool> authorizeOnlineAI() async {
+    if (!AssistantService.isAvailable) return false;
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool('online_ai_consent') == true) return true;
+    if (!mounted) return false;
+    final answer = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Usar inteligência artificial online?'),
+        content: const Text(
+          'Para compreender mensagens e compromissos, o aplicativo enviará '
+          'sua mensagem, parte da conversa e os lembretes cadastrados para '
+          'o servidor e o provedor de inteligência artificial configurado. '
+          'Você pode continuar usando lembretes básicos sem ativar isso.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Agora não')),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Aceitar e continuar')),
+        ],
+      ),
+    ) ?? false;
+    if (answer) await prefs.setBool('online_ai_consent', true);
+    return answer;
+  }
+
+  Future<void> handleExistingReminder(AssistantResponse result) async {
+    final id = result.targetId;
+    if (id == null) {
+      bot('Qual compromisso você deseja alterar? Veja os detalhes na Agenda.');
+      return;
+    }
+    final index = reminders.indexWhere((r) => r.id == id);
+    if (index < 0) {
+      bot('Não encontrei esse compromisso no seu aparelho.');
+      return;
+    }
+    final original = reminders[index];
+    if (result.intent == 'cancel' || result.intent == 'complete') {
+      final verb = result.intent == 'cancel' ? 'Cancelar' : 'Concluir';
+      final confirmed = await askConfirmation(
+        verb + ' lembrete?',
+        original.title + '\n' + formatted(original.when),
+      );
+      if (!confirmed) { bot('Entendido, não alterei o lembrete.'); return; }
+      await cancelReminder(original);
+      setState(() {
+        if (result.intent == 'cancel') {
+          reminders.removeAt(index);
+        } else {
+          original.done = true;
+        }
+      });
+      await save();
+      bot('Pronto! O compromisso foi ' +
+          (result.intent == 'cancel' ? 'cancelado.' : 'marcado como concluído.'));
+      return;
+    }
+    if (result.intent == 'update') {
+      final suggestion = result.reminder;
+      if (suggestion == null) {
+        bot('Diga a nova data e o horário desejados.');
+        return;
+      }
+      final confirmed = await askConfirmation(
+        'Alterar compromisso?',
+        original.title + '\nDe: ' + formatted(original.when) +
+        '\nPara: ' + suggestion.title + '\n' + formatted(suggestion.when),
+      );
+      if (!confirmed) { bot('Tudo bem, mantive o compromisso anterior.'); return; }
+      await cancelReminder(original);
+      final updated = Reminder(original.id, suggestion.title, suggestion.when);
+      setState(() => reminders[index] = updated);
+      await save();
+      try {
+        await scheduleReminder(updated);
+        bot('Compromisso atualizado para ' + formatted(updated.when) + '.');
+      } catch (_) {
+        bot('Compromisso alterado, mas não consegui programar os avisos. '
+            'Confira as permissões de notificação.');
+      }
+    }
+  }
+
   Future<void> send() async {
     final message = input.text.trim();
     if (message.isEmpty || sending) return;
@@ -127,43 +253,66 @@ class _MainScreenState extends State<MainScreen> {
     });
     try {
       final now = DateTime.now();
-      final local = parseReminder(message, now);
-      final online = await AssistantService.ask(message, now);
+      AssistantResponse? online;
+      if (await authorizeOnlineAI()) {
+        online = await AssistantService.ask(
+          message, now,
+          history: messages.take(8).map((m) =>
+            {'role':m.$1 ? 'user' : 'assistant', 'text':m.$2}).toList(),
+          reminders: reminders.map((r)=>r.toJson()).toList(),
+        );
+      }
       if (!mounted) return;
-      DateTime? when = online?.reminder?.when ?? local?.when;
-      String? title = online?.reminder?.title ?? local?.title;
-      if (when == null || title == null) {
-        setState(() => messages.add((false,
-          online?.reply.isNotEmpty == true
-            ? online!.reply
-            : 'Posso ajudar a organizar seus compromissos. Escreva, por exemplo: '
-              '"Lembre-me amanhã às 14 horas de pagar a conta". '
-              'Para criar um lembrete, preciso saber a data, o horário e o assunto.')));
+      if (online != null) {
+        if (online.intent == 'list') { bot(upcomingSummary()); return; }
+        if (['update','cancel','complete'].contains(online.intent)) {
+          await handleExistingReminder(online);
+          return;
+        }
+        if (online.intent == 'chat' || online.intent == 'clarify') {
+          bot(online.reply.isNotEmpty ? online.reply :
+            'Você poderia explicar melhor o que deseja?');
+          return;
+        }
+      }
+      if (online == null && isListing(message)) {
+        bot(upcomingSummary());
+        return;
+      }
+      final local = online == null ? parseReminder(message, now) : null;
+      final suggested = online?.reminder;
+      final title = suggested?.title ?? local?.title;
+      final when = suggested?.when ?? local?.when;
+      if (title == null || when == null) {
+        bot(online?.reply.isNotEmpty == true ? online!.reply :
+          'Posso ajudar a organizar compromissos. Por exemplo: '
+          '"Me lembre amanhã às 14 horas de pagar a conta". '
+          'Preciso de data, horário e assunto para criar um lembrete.');
         return;
       }
       if (reminders.where((r) => !r.done).length >= 10) {
-        setState(() => messages.add((false,
-          'Você atingiu o limite de dez lembretes ativos. '
-          'Marque um compromisso como concluído para cadastrar outro.')));
+        bot('Você chegou ao limite gratuito de dez lembretes ativos. '
+            'Conclua um compromisso para cadastrar outro.');
         return;
       }
       final reminder = Reminder(
         DateTime.now().millisecondsSinceEpoch % 100000000, title, when);
       setState(() => reminders.add(reminder));
       await save();
-      bool notified = true;
-      try { await scheduleReminder(reminder); }
-      catch (_) { notified = false; }
-      if (!mounted) return;
-      setState(() => messages.add((false,
-        notified
-          ? 'Pronto! Seu lembrete "' + title! + '" foi salvo para '
-            + formatted(when) + '. O aplicativo programou avisos para '
-              'um dia antes, quarenta minutos antes e no horário, '
-              'quando esses horários ainda estiverem no futuro.'
-          : 'Salvei "' + title! + '" para ' + formatted(when)
-            + ', mas não consegui ativar as notificações. '
-              'Verifique as permissões do aplicativo no celular.')));
+      try {
+        await scheduleReminder(reminder);
+        bot('Lembrete cadastrado: "' + title + '" para ' +
+            formatted(when) + '. Os avisos foram programados para '
+            'um dia antes, quarenta minutos antes e no horário '
+            'quando ainda estiverem no futuro.');
+      } catch (_) {
+        bot('Salvei o lembrete para ' + formatted(when) +
+          ', mas não consegui programar os avisos. '
+          'Confira as permissões de notificação.');
+      }
+    } catch (_) {
+      bot('Não consegui completar seu pedido agora. '
+        'Seus lembretes já cadastrados permanecem salvos.');
     } finally {
       if (mounted) setState(() => sending = false);
     }
