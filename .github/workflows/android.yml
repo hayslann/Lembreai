@@ -29,7 +29,7 @@ jobs:
           from pathlib import Path
           p = Path('android/app/src/main/AndroidManifest.xml')
           s = p.read_text()
-          s = s.replace('<application', '<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />\n    <application', 1)
+          s = s.replace('<application', '<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />\n    <application', 1)
           s = s.replace('</application>', '''<receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"/>
               <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
                 <intent-filter>
@@ -63,7 +63,7 @@ jobs:
       - name: Testar entendimento e segurança da IA
         run: node --test backend/brain.test.mjs backend/cloudflare-worker.test.mjs backend/multimodal.test.mjs
       - name: Compilar APK
-        run: flutter build apk --debug --dart-define=AI_SERVER_URL="${{ vars.LEMBREAI_AI_URL }}"
+        run: flutter build apk --debug --dart-define=AI_SERVER_URL="https://lembreai-ia.hayslan08.workers.dev"
       - name: Enviar APK
         uses: actions/upload-artifact@v4
         with:
