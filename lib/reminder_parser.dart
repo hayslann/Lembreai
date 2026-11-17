@@ -18,7 +18,7 @@ ParsedReminder? parseReminder(String input, DateTime now) {
       .allMatches(normalized)
       .where((m) => m.group(0)!.contains(':') ||
           m.group(0)!.contains('h') ||
-          normalized.substring(0, m.start).endsWith('as '))
+          m.group(0)!.trimLeft().startsWith('as '))
       .firstOrNull;
   if (t == null) return null;
   final hour = int.parse(t.group(1)!);
@@ -52,6 +52,7 @@ ParsedReminder? parseReminder(String input, DateTime now) {
       .replaceFirst(RegExp(r'(?:às|as)\s*\d{1,2}(?::\d{2}|h\d{0,2})?', caseSensitive: false), '')
       .replaceFirst(RegExp(r'\b\d{1,2}(?::\d{2}|h\d{0,2})\b'), '')
       .trim()
+      .replaceFirst(RegExp(r'^horas\s+', caseSensitive: false), '')
       .replaceFirst(RegExp(r'^de\s+', caseSensitive: false), '')
       .trim();
   if (title.isEmpty) title = 'Seu compromisso';
