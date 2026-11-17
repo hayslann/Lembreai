@@ -38,7 +38,7 @@ async function aiRespond(message, now, history, reminders, image) {
   }
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw Error('GEMINI_API_KEY não configurada');
-  const model = process.env.GEMINI_MODEL || 'gemini-flash-latest';
+  const model = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
   const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(model)+':generateContent', {
     method:'POST',
     headers:{'Content-Type':'application/json', 'x-goog-api-key':key},
