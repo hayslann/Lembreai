@@ -23,7 +23,7 @@ const response=await fetch(endpoint+'/chat',{
 if (!response.ok) {
   const error=await response.json().catch(()=>({}));
   throw new Error('Gemini /chat: HTTP '+response.status+
-    ' - '+(typeof error.error==='string'?error.error:'indisponivel'));
+    ' - '+(typeof error.error==='string'?error.error:'indisponivel')+' (diagnostico: '+String(error.diagnostic||'nenhum')+')');
 }
 const data=await response.json();
 if (data.intent!=='chat' || typeof data.reply!=='string' ||
