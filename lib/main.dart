@@ -61,7 +61,12 @@ Future<bool> scheduleReminder(Reminder r, {bool requestPermissions = false}) asy
       throw StateError('Permissão de notificações não concedida.');
     }
     // No Android 12+, o usuário precisa autorizar alarmes precisos.
-    await android?.requestExactAlarmsPermission();
+    try {
+      await android?.requestExactAlarmsPermission();
+    } catch (_) {
+      // Alguns Androids não permitem abrir essa tela; agenda com
+      // horário aproximado no lugar de abandonar o lembrete.
+    }
   }
   final exact = await android?.canScheduleExactNotifications() == true;
   const details = NotificationDetails(
@@ -358,7 +363,8 @@ class _MainScreenState extends State<MainScreen> {
         bot('Lembrete salvo: "' + title + '" para ' + formatted(when) +
           '. O celular foi configurado para avisar ' +
           advanceLabel(reminder.advanceMinutes).toLowerCase() +
-          ' e no horário marcado.' +
+          (reminder.advanceMinutes == 0
+            ? '.' : ' e no horário marcado.') +
           (exact ? '' : ' Atenção: sem a permissão de alarmes precisos, '
           'o Android pode atrasar o toque.'));
       } catch (_) {
@@ -383,6 +389,38 @@ class _MainScreenState extends State<MainScreen> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('name', entered);
     if (mounted) setState(() => name = entered);
+  }
+
+  Future<void> testNotificationSound() async {
+    final android = alarms.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    final allowed = await android?.requestNotificationsPermission();
+    if (allowed == false) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Autorize as notificações do LembreAI no Android '
+          'para ouvir os alertas sonoros.')));
+      return;
+    }
+    try {
+      await alarms.show(
+        999000001,
+        '🔔 Teste de som do LembreAI',
+        'Se ouviu este aviso, o som das notificações está habilitado.',
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'lembreai_lembretes_sonoros_v2', 'LembreAI — avisos sonoros',
+            channelDescription: 'Lembretes antes e no horário de cada compromisso',
+            importance: Importance.max, priority: Priority.max,
+            playSound: true, enableVibration: true,
+            category: AndroidNotificationCategory.reminder,
+          ),
+        ),
+      );
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Não foi possível tocar a notificação. '
+          'Verifique o volume, o modo silencioso e as permissões.')));
+    }
   }
 
   Future<void> configureAi() async {
@@ -543,8 +581,15 @@ class _MainScreenState extends State<MainScreen> {
             ]),
           ]))),
       ]) : ListView(children: [
-        const ListTile(title: Text('Meus lembretes'),
-          subtitle: Text('Você pode concluir um lembrete para liberar espaço.')),
+        ListTile(title: const Text('Meus lembretes'),
+          subtitle: const Text('Os avisos tocam no horário e, por padrão, '
+            '30 minutos antes. Ajuste cada compromisso se desejar.'),
+          trailing: IconButton(
+            tooltip: 'Testar som do alerta',
+            icon: const Icon(Icons.volume_up_outlined),
+            onPressed: testNotificationSound,
+          ),
+        ),
         for (final r in reminders)
           CheckboxListTile(
             value: r.done,
