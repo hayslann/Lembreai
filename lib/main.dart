@@ -7,6 +7,7 @@ import 'package:timezone/timezone.dart' as tz;
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'reminder_parser.dart';
 import 'assistant_service.dart';
+import 'alert_preferences.dart';
 
 final alarms = FlutterLocalNotificationsPlugin();
 
@@ -27,43 +28,77 @@ class Reminder {
   final String title;
   final DateTime when;
   bool done;
-  Reminder(this.id, this.title, this.when, {this.done = false});
-  Map<String, dynamic> toJson() =>
-      {'id': id, 'title': title, 'when': when.toIso8601String(), 'done': done};
+  int advanceMinutes;
+
+  Reminder(this.id, this.title, this.when, {
+    this.done = false,
+    this.advanceMinutes = defaultAdvanceMinutes,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'title': title,
+    'when': when.toIso8601String(),
+    'done': done,
+    'advanceMinutes': advanceMinutes,
+  };
+
   factory Reminder.fromJson(Map<String, dynamic> v) =>
-      Reminder(v['id'] as int, v['title'] as String, DateTime.parse(v['when'] as String),
-          done: v['done'] == true);
+      Reminder(v['id'] as int, v['title'] as String,
+        DateTime.parse(v['when'] as String),
+        done: v['done'] == true,
+        advanceMinutes: normalizedAdvanceMinutes(v['advanceMinutes']));
 }
 
-Future<void> scheduleReminder(Reminder r) async {
+/// Agenda avisos sonoros usando o canal específico da nova versão.
+/// O som depende de permissão, volume, modo silencioso e economia de bateria.
+Future<bool> scheduleReminder(Reminder r, {bool requestPermissions = false}) async {
   final android = alarms.resolvePlatformSpecificImplementation<
       AndroidFlutterLocalNotificationsPlugin>();
-  await android?.requestNotificationsPermission();
+  if (requestPermissions) {
+    final notificationsGranted = await android?.requestNotificationsPermission();
+    if (notificationsGranted == false) {
+      throw StateError('Permissão de notificações não concedida.');
+    }
+    // No Android 12+, o usuário precisa autorizar alarmes precisos.
+    await android?.requestExactAlarmsPermission();
+  }
+  final exact = await android?.canScheduleExactNotifications() == true;
   const details = NotificationDetails(
     android: AndroidNotificationDetails(
-      'lembreai_alertas', 'Lembretes',
-      channelDescription: 'Avisos antecipados e compromissos',
-      importance: Importance.max, priority: Priority.high,
-      playSound: true, enableVibration: true,
+      'lembreai_lembretes_sonoros_v2', 'LembreAI — avisos sonoros',
+      channelDescription: 'Lembretes antes e no horário de cada compromisso',
+      importance: Importance.max,
+      priority: Priority.max,
+      playSound: true,
+      enableVibration: true,
+      category: AndroidNotificationCategory.reminder,
     ),
   );
-  final offsets = [const Duration(days: 1), const Duration(minutes: 40), Duration.zero];
-  for (var i = 0; i < offsets.length; i++) {
-    final when = r.when.subtract(offsets[i]);
-    if (when.isAfter(DateTime.now())) {
-      await alarms.zonedSchedule(
-        r.id * 3 + i, '🔔 ${r.title}',
-        i == 2 ? 'Chegou a hora!' : 'Compromisso em ${offsets[i].inMinutes} minutos',
-        tz.TZDateTime.from(when, tz.local), details,
-        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-        uiLocalNotificationDateInterpretation:
-            UILocalNotificationDateInterpretation.absoluteTime,
-      );
-    }
+  // Limpa os 3 slots usados na versão antiga (incluindo aviso de 1 dia).
+  await cancelReminder(r);
+  final moments = calculateAlertMoments(
+      r.when, r.advanceMinutes, DateTime.now());
+  for (final moment in moments) {
+    await alarms.zonedSchedule(
+      r.id * 3 + moment.slot, '🔔 ' + r.title, moment.body,
+      tz.TZDateTime.from(moment.when, tz.local),
+      details,
+      androidScheduleMode: exact
+          ? AndroidScheduleMode.exactAllowWhileIdle
+          : AndroidScheduleMode.inexactAllowWhileIdle,
+      uiLocalNotificationDateInterpretation:
+          UILocalNotificationDateInterpretation.absoluteTime,
+    );
   }
+  // false significa que o Android pode atrasar o toque.
+  return exact;
 }
+
 Future<void> cancelReminder(Reminder r) async {
-  for (var i = 0; i < 3; i++) { await alarms.cancel(r.id * 3 + i); }
+  for (var i = 0; i < 3; i++) {
+    await alarms.cancel(r.id * 3 + i);
+  }
 }
 
 class LembreAI extends StatelessWidget {
