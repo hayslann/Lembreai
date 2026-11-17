@@ -1,4 +1,7 @@
 import 'dart:convert';
+import 'dart:typed_data';
+import 'package:image_picker/image_picker.dart';
+import 'brand_logo.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -27,11 +30,13 @@ class Reminder {
   final int id;
   final String title;
   final DateTime when;
+  final String location;
   bool done;
   int advanceMinutes;
 
   Reminder(this.id, this.title, this.when, {
     this.done = false,
+    this.location = '',
     this.advanceMinutes = defaultAdvanceMinutes,
   });
 
@@ -39,6 +44,7 @@ class Reminder {
     'id': id,
     'title': title,
     'when': when.toIso8601String(),
+    'location': location,
     'done': done,
     'advanceMinutes': advanceMinutes,
   };
@@ -47,6 +53,7 @@ class Reminder {
       Reminder(v['id'] as int, v['title'] as String,
         DateTime.parse(v['when'] as String),
         done: v['done'] == true,
+        location: v['location'] is String ? v['location'] as String : '',
         advanceMinutes: normalizedAdvanceMinutes(v['advanceMinutes']));
 }
 
@@ -116,7 +123,39 @@ class LembreAI extends StatelessWidget {
         seedColor: const Color(0xff7844ed), brightness: Brightness.dark),
       useMaterial3: true,
     ),
-    home: const MainScreen(),
+    home: const SplashScreen(),
+  );
+}
+
+class SplashScreen extends StatefulWidget {
+  const SplashScreen({super.key});
+  @override
+  State<SplashScreen> createState() => _SplashScreenState();
+}
+
+class _SplashScreenState extends State<SplashScreen> {
+  @override
+  void initState() {
+    super.initState();
+    Future.delayed(const Duration(milliseconds: 1700), () {
+      if (mounted) Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const MainScreen()));
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => const Scaffold(
+    backgroundColor: Color(0xff130829),
+    body: Center(child: Padding(
+      padding: EdgeInsets.all(32),
+      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        BrandLogo(size: 280),
+        SizedBox(height: 24),
+        Text('Sua memória, sempre com você.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Colors.white70,fontSize:17)),
+      ]),
+    )),
   );
 }
 
@@ -129,8 +168,12 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   final input = TextEditingController();
   final nameInput = TextEditingController();
+  Uint8List? attachedPhoto;
+  String? attachedMime;
+  String? attachedName;
+  final picker = ImagePicker();
   final messages = <(bool, String)>[
-    (false, 'Olá! 🤖 Sou o LembreAI. Digite: Me lembra amanhã às 14:30 de pagar o boleto.')
+    (false, 'Oi! Sou o LembreAI 💜 Converse comigo ou me mande uma foto da agenda e até o texto de um e-mail para organizar os compromissos.')
   ];
   final reminders = <Reminder>[];
   String name = '';
@@ -178,7 +221,8 @@ class _MainScreenState extends State<MainScreen> {
       return 'Você não tem lembretes ativos cadastrados neste aparelho.';
     }
     final rows = upcoming.take(10).map((r) =>
-        '• ' + r.title + ' — ' + formatted(r.when)).join('\n');
+        '• ' + r.title + ' — ' + formatted(r.when) +
+        (r.location.isEmpty ? '' : ' — ' + r.location)).join('\n');
     return 'Estes são seus lembretes ativos neste aparelho:\n' + rows;
   }
 
@@ -285,7 +329,8 @@ class _MainScreenState extends State<MainScreen> {
       if (!confirmed) { bot('Tudo bem, mantive o compromisso anterior.'); return; }
       await cancelReminder(original);
       final updated = Reminder(original.id, suggestion.title, suggestion.when,
-        advanceMinutes: original.advanceMinutes);
+        location: suggestion.location.isEmpty ? original.location : suggestion.location,
+        advanceMinutes: suggestion.advanceMinutes ?? original.advanceMinutes);
       setState(() => reminders[index] = updated);
       await save();
       try {
@@ -496,7 +541,7 @@ class _MainScreenState extends State<MainScreen> {
             child: Column(mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Center(child: Text('🤖', style: TextStyle(fontSize: 76))),
+                const Center(child: BrandLogo(size: 180)),
                 const SizedBox(height: 12),
                 Text('Bem-vindo ao LembreAI',
                   textAlign: TextAlign.center,
@@ -598,6 +643,7 @@ class _MainScreenState extends State<MainScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(formatted(r.when)),
+                if (r.location.isNotEmpty) Text('Local: '+r.location),
                 DropdownButton<int>(
                   value: r.advanceMinutes,
                   isExpanded: true,
