@@ -97,7 +97,7 @@ async function respondWithModel(data,env) {
     result=JSON.parse(payload.choices?.[0]?.message?.content||'{}');
   } else {
     if (!env.GEMINI_API_KEY) throw new Error('Gemini não configurado');
-    const model=env.GEMINI_MODEL||'gemini-2.5-flash-lite';
+    const model=env.GEMINI_MODEL||'gemini-flash-latest';
     const r=await fetch(
       'https://generativelanguage.googleapis.com/v1beta/models/'+
         encodeURIComponent(model)+':generateContent',{
