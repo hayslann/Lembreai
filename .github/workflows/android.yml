@@ -39,6 +39,10 @@ jobs:
               </receiver>
             </application>''', 1)
           p.write_text(s)
+          # Usar o ícone oficial da marca em vez do logo Flutter padrão.
+          brand_icon = Path('assets/branding/lembreai_logo.png').read_bytes()
+          for launcher in Path('android/app/src/main/res').glob('mipmap-*/ic_launcher.png'):
+              launcher.write_bytes(brand_icon)
           kts = Path('android/app/build.gradle.kts')
           groovy = Path('android/app/build.gradle')
           if kts.exists():
