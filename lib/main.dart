@@ -86,4 +86,26 @@ class _HomePageState extends State<HomePage> {
       ]),
     );
   }
-}
+}  Future<void> _send() async {
+    final text = input.text.trim();
+    if (text.isEmpty) return;
+    input.clear();
+    setState(() => messages.add({'who':'me','text':text}));
+    final parsed = parseReminder(text, DateTime.now());
+    if (parsed == null) {
+      setState(() => messages.add({'who':'bot','text':
+        'Posso criar lembretes! 💜 Experimente: "Me lembra amanhã às 14:30 de pagar o boleto". Você também pode tocar no botão +.'}));
+      return;
+    }
+    if (reminders.where((r) => !r.done).length >= 10) {
+      setState(() => messages.add({'who':'bot','text':'Você chegou ao limite gratuito de 10 lembretes ativos. Conclua um lembrete para criar outro.'}));
+      return;
+    }
+    final reminder = Reminder(DateTime.now().microsecondsSinceEpoch.toString(), parsed.title, parsed.when);
+    setState(() { reminders.add(reminder); messages.add({'who':'bot','text':
+      'Combinado! 🔔 "${reminder.title}" em ${DateFormat('dd/MM/yyyy HH:mm').format(reminder.when)}. Vou tentar avisar 1 dia e 40 minutos antes, e na hora.'}); });
+    await _save();
+    try { await scheduleReminder(reminder); }
+    catch (_) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Confira as permissões de notificação do Android.'))); }
+  }
+
