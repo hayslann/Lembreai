@@ -56,6 +56,8 @@ jobs:
         run: flutter pub get
       - name: Cinco testes
         run: flutter test test/reminder_parser_test.dart
+      - name: Testar entendimento e segurança da IA
+        run: node --test backend/brain.test.mjs
       - name: Compilar APK
         run: flutter build apk --debug --dart-define=AI_SERVER_URL="${{ vars.LEMBREAI_AI_URL }}"
       - name: Enviar APK
