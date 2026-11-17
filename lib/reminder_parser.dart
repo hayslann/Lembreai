@@ -46,13 +46,13 @@ ParsedReminder? parseReminder(String input, DateTime now) {
   if (!date.isAfter(now)) return null;
 
   var title = input
-      .replaceFirst(RegExp(r'(?i)^\s*me\s+lembra(?:r)?\s+(?:de\s+)?'), '')
-      .replaceFirst(RegExp(r'(?i)\b(?:amanhã|amanha|hoje)\b'), '')
+      .replaceFirst(RegExp(r'^\s*me\s+lembra(?:r)?\s+(?:de\s+)?', caseSensitive: false), '')
+      .replaceFirst(RegExp(r'\b(?:amanhã|amanha|hoje)\b', caseSensitive: false), '')
       .replaceFirst(RegExp(r'\b\d{1,2}/\d{1,2}(?:/\d{4})?\b'), '')
-      .replaceFirst(RegExp(r'(?i)(?:às|as)\s*\d{1,2}(?::\d{2}|h\d{0,2})?'), '')
+      .replaceFirst(RegExp(r'(?:às|as)\s*\d{1,2}(?::\d{2}|h\d{0,2})?', caseSensitive: false), '')
       .replaceFirst(RegExp(r'\b\d{1,2}(?::\d{2}|h\d{0,2})\b'), '')
       .trim()
-      .replaceFirst(RegExp(r'(?i)^de\s+'), '')
+      .replaceFirst(RegExp(r'^de\s+', caseSensitive: false), '')
       .trim();
   if (title.isEmpty) title = 'Seu compromisso';
   return ParsedReminder(title, date);
