@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "lembreai-ia",
+  "main": "cloudflare-worker.mjs",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": true,
+  "vars": {
+    "AI_PROVIDER": "gemini",
+    "GEMINI_MODEL": "gemini-2.5-flash-lite",
+    "GLOBAL_DAILY_LIMIT": "75",
+    "PER_IP_DAILY_LIMIT": "20"
+  },
+  "durable_objects": {
+    "bindings": [
+      {"name": "QUOTA", "class_name": "UsageQuota"}
+    ]
+  },
+  "migrations": [
+    {"tag": "v1", "new_sqlite_classes": ["UsageQuota"]}
+  ]
+}
