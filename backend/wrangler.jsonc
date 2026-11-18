@@ -10,6 +10,14 @@
     "GLOBAL_DAILY_LIMIT": "75",
     "PER_IP_DAILY_LIMIT": "20"
   },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "lembreai-operacoes",
+      "database_id": "f2879d81-67a7-4476-950e-b3d8e16385f2",
+      "migrations_dir": "migrations"
+    }
+  ],
   "durable_objects": {
     "bindings": [
       {"name": "QUOTA", "class_name": "UsageQuota"}
