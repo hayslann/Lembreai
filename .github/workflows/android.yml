@@ -29,7 +29,7 @@ jobs:
           from pathlib import Path
           p = Path('android/app/src/main/AndroidManifest.xml')
           s = p.read_text()
-          s = s.replace('<application', '<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />\n    <application', 1)
+          s = s.replace('<application', '<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />\n    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />\n    <application', 1)
           s = s.replace('</application>', '''<receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"/>
               <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
                 <intent-filter>
@@ -67,7 +67,7 @@ jobs:
       - name: Dependências
         run: flutter pub get
       - name: Testar interpretação e avisos sonoros
-        run: flutter test test/reminder_parser_test.dart test/alert_preferences_test.dart test/plan_catalog_test.dart
+        run: flutter test test/reminder_parser_test.dart test/alert_preferences_test.dart test/plan_catalog_test.dart test/app_update_service_test.dart
       - name: Testar entendimento e segurança da IA
         run: node --test backend/brain.test.mjs backend/cloudflare-worker.test.mjs backend/multimodal.test.mjs backend/commercial-readiness.test.mjs
       - name: Teste real da conversa com Gemini na Cloudflare
@@ -96,3 +96,12 @@ jobs:
               --notes "Versão básica de testes. Não é a versão publicada na Play Store." \
               --prerelease --target "${GITHUB_SHA}"
           fi
+          VERSION_LINE="$(grep '^version:' pubspec.yaml | awk '{print $2}')"
+          VERSION_NAME="${VERSION_LINE%%+*}"
+          VERSION_CODE="${VERSION_LINE##*+}"
+          gh release edit teste-android --notes "LembreAI beta ${VERSION_NAME}. Atualizações distribuídas pelo GitHub, fora da Play Store.
+
+LEMBREAI_VERSION_NAME=${VERSION_NAME}
+LEMBREAI_VERSION_CODE=${VERSION_CODE}
+
+Aviso: o Android requer assinatura digital idêntica para atualizar sem apagar dados. O app sempre pedirá a confirmação do usuário."
