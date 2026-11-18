@@ -8,7 +8,7 @@ Map<String,dynamic> release({int build=6,String? url,String? digest}) => {
     {'name':'LembreAI.apk',
      'browser_download_url':url??AppUpdateService.trustedDownload,
      'size':45000000,
-     'digest':digest??'sha256:${'a'*64}'}
+     'digest':digest ?? ('sha256:' + 'a'.padRight(64, 'a'))}
   ],
 };
 
