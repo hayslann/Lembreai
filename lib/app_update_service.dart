@@ -109,7 +109,7 @@ class AppUpdateService {
           received+=part.length;
           if(received>_maxSize) throw StateError('APK acima do limite.');
           sink.add(part);
-          onProgress?.call((received/version.sizeBytes).clamp(0.0,1.0));
+          onProgress?.call((received/version.sizeBytes).clamp(0.0,1.0).toDouble());
         }
       } finally {
         await sink.flush();
