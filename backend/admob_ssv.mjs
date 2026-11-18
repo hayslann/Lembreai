@@ -71,7 +71,11 @@ export async function verifyAdMobCallback(request) {
   if(!Number.isSafeInteger(timestamp)||Math.abs(Date.now()-timestamp)>24*60*60*1000||
       !/^[A-Za-z0-9:_-]{5,150}$/.test(uid)||
       !/^[A-Za-z0-9_-]{32,100}$/.test(customData)||
-      !/^[A-Fa-f0-9]{16,128}$/.test(transactionId)||
+      // O callback de teste do painel pode usar um transaction_id sintético
+      // mais curto ou com separadores. A assinatura ECDSA já foi verificada
+      // antes deste ponto; o valor continua sendo obrigatório e nunca autoriza
+      // recompensa sem uma sessão válida no D1.
+      !/^[A-Za-z0-9:_-]{1,128}$/.test(transactionId)||
       !/^[0-9]{1,24}$/.test(adUnit))return null;
   return {uid,customData,transactionId,adUnit,timestamp};
 }
