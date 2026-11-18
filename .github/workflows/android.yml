@@ -91,8 +91,8 @@ jobs:
               if not gradle.exists():
                   continue
               content = gradle.read_text()
-              workaround = "\ntasks.configureEach {\n    if (name == 'lintVitalAnalyzeRelease') enabled = false\n}\n"
-              if 'name == \'lintVitalAnalyzeRelease\'' not in content:
+              workaround = '\ntasks.configureEach {\n    if (name == "lintVitalAnalyzeRelease") enabled = false\n}\n'
+              if 'lintVitalAnalyzeRelease' not in content:
                   gradle.write_text(content + workaround)
                   patched += 1
           print(f'Contorno de lint aplicado a {patched} plugins Android.')
