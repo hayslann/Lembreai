@@ -83,31 +83,122 @@ jobs:
         run: node backend/smoke-live.mjs
       - name: Testar acesso protegido ao painel administrativo
         run: node backend/admin-live-smoke.mjs
+      - name: Preparar assinatura persistente do Android
+        id: android_signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          present=0
+          for value in "$KEYSTORE_BASE64" "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD"; do
+            [[ -n "$value" ]] && present=$((present + 1))
+          done
+          if [[ "$present" == 0 ]]; then
+            echo "stable=false" >> "$GITHUB_OUTPUT"
+            echo "Assinatura persistente ausente; este job compilará somente APK de teste." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [[ "$present" != 4 ]]; then
+            echo "Configure os quatro segredos Android antes de gerar APK atualizável." >&2
+            exit 1
+          fi
+          path="$RUNNER_TEMP/lembreai-release.jks"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$path"
+          chmod 600 "$path"
+          keytool -list -keystore "$path" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
+          echo "stable=true" >> "$GITHUB_OUTPUT"
+          echo "ANDROID_KEYSTORE_PATH=$path" >> "$GITHUB_ENV"
+      - name: Configurar assinatura persistente no Gradle
+        if: ${{ steps.android_signing.outputs.stable == 'true' }}
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          kts = Path('android/app/build.gradle.kts')
+          groovy = Path('android/app/build.gradle')
+          if kts.exists():
+              p = kts
+              s = p.read_text()
+              signing = '''\n                  create("stableRelease") {
+                      storeFile = file(System.getenv("ANDROID_KEYSTORE_PATH"))
+                      storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                      keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                      keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+                  }\n'''
+              if 'signingConfigs {' in s:
+                  s = s.replace('signingConfigs {', 'signingConfigs {' + signing, 1)
+              else:
+                  s = s.replace('android {', 'android {\n    signingConfigs {' + signing + '    }\n', 1)
+              s, count = re.subn(r'(release\s*\{[\s\S]*?)signingConfig\s*=\s*signingConfigs\.getByName\("debug"\)', r'\1signingConfig = signingConfigs.getByName("stableRelease")', s, count=1)
+              if count != 1:
+                  raise SystemExit('Não encontrei a assinatura release padrão no Gradle Kotlin.')
+          elif groovy.exists():
+              p = groovy
+              s = p.read_text()
+              signing = '''\n                  stableRelease {
+                      storeFile file(System.getenv("ANDROID_KEYSTORE_PATH"))
+                      storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                      keyAlias System.getenv("ANDROID_KEY_ALIAS")
+                      keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+                  }\n'''
+              if 'signingConfigs {' in s:
+                  s = s.replace('signingConfigs {', 'signingConfigs {' + signing, 1)
+              else:
+                  s = s.replace('android {', 'android {\n    signingConfigs {' + signing + '    }\n', 1)
+              s, count = re.subn(r'(release\s*\{[\s\S]*?)signingConfig\s+signingConfigs\.debug', r'\1signingConfig signingConfigs.stableRelease', s, count=1)
+              if count != 1:
+                  raise SystemExit('Não encontrei a assinatura release padrão no Gradle Groovy.')
+          else:
+              raise SystemExit('Arquivo Gradle Android não encontrado.')
+          p.write_text(s)
+          PY
       - name: Compilar APK
+        id: build_apk
         env:
           FIREBASE_WEB_API_KEY: ${{ secrets.FIREBASE_WEB_API_KEY }}
           GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID }}
           ADMOB_REWARDED_AD_UNIT_ID: ${{ secrets.ADMOB_REWARDED_AD_UNIT_ID }}
-        run: >-
-          flutter build apk --debug
-          --dart-define=AI_SERVER_URL="https://lembreai-ia.hayslan08.workers.dev"
-          --dart-define=FIREBASE_WEB_API_KEY="$FIREBASE_WEB_API_KEY"
-          --dart-define=GOOGLE_WEB_CLIENT_ID="$GOOGLE_WEB_CLIENT_ID"
-          --dart-define=ADMOB_REWARDED_AD_UNIT_ID="$ADMOB_REWARDED_AD_UNIT_ID"
+          ANDROID_KEYSTORE_PATH: ${{ env.ANDROID_KEYSTORE_PATH }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ steps.android_signing.outputs.stable }}" == "true" ]]; then
+            flutter build apk --release \
+              --dart-define=AI_SERVER_URL="https://lembreai-ia.hayslan08.workers.dev" \
+              --dart-define=FIREBASE_WEB_API_KEY="$FIREBASE_WEB_API_KEY" \
+              --dart-define=GOOGLE_WEB_CLIENT_ID="$GOOGLE_WEB_CLIENT_ID" \
+              --dart-define=ADMOB_REWARDED_AD_UNIT_ID="$ADMOB_REWARDED_AD_UNIT_ID"
+            echo "apk_path=build/app/outputs/flutter-apk/app-release.apk" >> "$GITHUB_OUTPUT"
+          else
+            flutter build apk --debug \
+              --dart-define=AI_SERVER_URL="https://lembreai-ia.hayslan08.workers.dev" \
+              --dart-define=FIREBASE_WEB_API_KEY="$FIREBASE_WEB_API_KEY" \
+              --dart-define=GOOGLE_WEB_CLIENT_ID="$GOOGLE_WEB_CLIENT_ID" \
+              --dart-define=ADMOB_REWARDED_AD_UNIT_ID="$ADMOB_REWARDED_AD_UNIT_ID"
+            echo "apk_path=build/app/outputs/flutter-apk/app-debug.apk" >> "$GITHUB_OUTPUT"
+          fi
       - name: Enviar APK
         uses: actions/upload-artifact@v4
         with:
           name: LembreAI-APK-teste
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          path: ${{ steps.build_apk.outputs.apk_path }}
           if-no-files-found: error
           retention-days: 14
 
       - name: Publicar APK de testes com link direto
+        if: ${{ steps.android_signing.outputs.stable == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          cp build/app/outputs/flutter-apk/app-debug.apk LembreAI.apk
+          cp "${{ steps.build_apk.outputs.apk_path }}" LembreAI.apk
           if gh release view teste-android >/dev/null 2>&1; then
             gh release upload teste-android LembreAI.apk --clobber
           else
