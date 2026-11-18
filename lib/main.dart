@@ -221,7 +221,7 @@ class _MainScreenState extends State<MainScreen> {
   String? attachedName;
   final picker = ImagePicker();
   final messages = <(bool, String)>[
-    (false, 'Oi! Sou o LembreAI 💜 Converse comigo ou me mande uma foto da agenda e até o texto de um e-mail para organizar os compromissos.')
+    (false, 'Oi! Sou o LembreAI 💜 Organizo sua agenda e seus lembretes. Pode escrever naturalmente, colar um convite ou enviar uma foto com datas e horários.')
   ];
   final reminders = <Reminder>[];
   String name = '';
@@ -1018,7 +1018,7 @@ class _MainScreenState extends State<MainScreen> {
               Expanded(child: TextField(controller: input,
                 onSubmitted: (_) => send(),
                 decoration: const InputDecoration(
-                  hintText: 'Converse, cole um e-mail ou envie uma foto...',
+                  hintText: 'Agende por texto, e-mail ou foto...',
                   border: OutlineInputBorder()))),
               IconButton(onPressed: sending ? null : send,
                 icon: const Icon(Icons.send)),
