@@ -75,24 +75,27 @@ jobs:
           PY
       - name: Dependências
         run: flutter pub get
-      - name: Contornar falha do lintVital do plugin Google Sign-In
+      - name: Contornar falha do lintVital em plugins Android de terceiros
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
-          roots = list(Path.home().glob('.pub-cache/hosted/pub.dev/google_sign_in_android-*/android'))
+          roots = list(Path.home().glob('.pub-cache/hosted/pub.dev/*/android'))
           if not roots:
-              raise SystemExit('Pacote google_sign_in_android não encontrado no cache do Flutter.')
+              raise SystemExit('Nenhum plugin Android encontrado no cache do Flutter.')
+          patched = 0
           for root in roots:
               gradle = root / 'build.gradle'
               if not gradle.exists():
                   gradle = root / 'build.gradle.kts'
               if not gradle.exists():
-                  raise SystemExit(f'Arquivo Gradle não encontrado em {root}')
+                  continue
               content = gradle.read_text()
               workaround = "\ntasks.configureEach {\n    if (name == 'lintVitalAnalyzeRelease') enabled = false\n}\n"
               if 'name == \'lintVitalAnalyzeRelease\'' not in content:
                   gradle.write_text(content + workaround)
+                  patched += 1
+          print(f'Contorno de lint aplicado a {patched} plugins Android.')
           PY
       - name: Testar interpretação e avisos sonoros
         run: flutter test test/reminder_parser_test.dart test/alert_preferences_test.dart test/plan_catalog_test.dart test/app_update_service_test.dart
