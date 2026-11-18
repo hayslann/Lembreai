@@ -2,6 +2,7 @@
 // A chave GEMINI_API_KEY ou OPENAI_API_KEY deve ser cadastrada como Secret
 // no painel Cloudflare. Nunca inclua a chave no APK ou no GitHub.
 import {systemInstruction, validateResponse, filteredHistory, filteredReminders, filteredImage} from './brain.mjs';
+import {handleAdmin,recordUsage} from './admin.mjs';
 
 function json(body, status=200) {
   return new Response(JSON.stringify(body), {status, headers:{
@@ -71,6 +72,7 @@ async function respondWithModel(data,env) {
   const conversation=[...history,{role:'user',text:data.message}];
   const image=filteredImage(data.image);
   let result;
+  let usage={inputTokens:0,outputTokens:0};
   if ((env.AI_PROVIDER||'gemini').toLowerCase()==='openai') {
     if (!env.OPENAI_API_KEY) throw new Error('OpenAI não configurada');
     const r=await fetch('https://api.openai.com/v1/chat/completions',{
@@ -95,6 +97,8 @@ async function respondWithModel(data,env) {
     if (!r.ok) throw new Error('OpenAI indisponível: '+r.status);
     const payload=await r.json();
     result=JSON.parse(payload.choices?.[0]?.message?.content||'{}');
+    usage={inputTokens:payload.usage?.prompt_tokens||0,
+      outputTokens:payload.usage?.completion_tokens||0};
   } else {
     if (!env.GEMINI_API_KEY) throw new Error('Gemini não configurado');
     const model=env.GEMINI_MODEL||'gemini-3.5-flash-lite';
@@ -122,16 +126,21 @@ async function respondWithModel(data,env) {
     });
     if (!r.ok) throw new Error('Gemini indisponível: '+r.status);
     const payload=await r.json();
+    usage={inputTokens:payload.usageMetadata?.promptTokenCount||0,
+      outputTokens:payload.usageMetadata?.candidatesTokenCount||0};
     const raw=payload.candidates?.[0]?.content?.parts?.map(
       p=>p.text||'').join('')||'{}';
     result=JSON.parse(raw);
   }
-  return validateResponse(result,reminders);
+  return {answer:validateResponse(result,reminders),usage};
 }
 
 export default {
-  async fetch(request,env) {
+  async fetch(request,env,ctx) {
     const url=new URL(request.url);
+    if(url.pathname==='/admin'||url.pathname.startsWith('/admin/')) {
+      return handleAdmin(request,env,ctx);
+    }
     if (request.method==='GET'&&url.pathname==='/health') {
       // Não vazar segredos ou informações da conta.
       return json({ok:true,provider:env.AI_PROVIDER||'gemini'});
@@ -171,11 +180,17 @@ export default {
       const limited=await limitRequest(request,env);
       if (limited) return limited;
       stage='model';
-      const answer=await respondWithModel(data,env);
+      const {answer,usage}=await respondWithModel(data,env);
+      if(ctx?.waitUntil)ctx.waitUntil(recordUsage(env,{
+        success:true,inputTokens:usage.inputTokens,
+        outputTokens:usage.outputTokens,hasImage:!!data.image,
+      }).catch(()=>{}));
       return json(answer);
     } catch (err) {
       const message=err instanceof Error ? err.message : 'erro desconhecido';
       console.error('Erro no LembreAI '+stage+':',message);
+      if(stage==='model' && ctx?.waitUntil)ctx.waitUntil(
+        recordUsage(env,{success:false,hasImage:!!data.image}).catch(()=>{}));
       // Apenas codigo de diagnostico, nunca revela a chave nem o texto da resposta.
       const providerCode=message.match(/(?:Gemini|OpenAI) indispon[ií]vel:\s*(\d{3})/);
       const diagnostic=stage==='quota' ? 'quota_failed' :
