@@ -43,6 +43,7 @@ small,.muted{color:#baaccc}#status{margin:15px 0;color:#d8caff}
 <article>Falhas<div class="number" id="errors">—</div></article>
 <article>Tokens de entrada<div class="number" id="inTokens">—</div></article>
 <article>Tokens de saída<div class="number" id="outTokens">—</div></article>
+<article>Estimativa em USD (tabela paga)<div class="number" id="estimatedCost">—</div></article>
 <article>Usuários identificados<div class="number" id="usersCount">—</div></article>
 </div>
 <section><h2>Consumo de IA — últimos 30 dias</h2>
@@ -85,6 +86,8 @@ async function load(){
   const prop={inTokens:'input_tokens',outTokens:'output_tokens',usersCount:'users'}[id]||id;
   el(id).textContent=fmt(s.total[prop]);
  }
+ el('estimatedCost').textContent=s.total.estimated_paid_cost_usd==null?'Não configurado':
+   '$ '+Number(s.total.estimated_paid_cost_usd).toFixed(5);
  table('days',s.days,['day','requests','successes','errors','input_tokens','output_tokens','image_requests']);
  table('users',u.users,['uid','email','plan','credit_balance','last_active_at']);
  table('purchases',p.purchases,['user_uid','plan','status','price_cents','created_at']);
@@ -123,7 +126,16 @@ export async function handleAdmin(request,env,ctx) {
     const days=(await env.DB.prepare('SELECT day,requests,successes,errors,input_tokens,output_tokens,image_requests FROM usage_daily ORDER BY day DESC LIMIT 30').all()).results;
     const totals=await env.DB.prepare('SELECT COALESCE(SUM(requests),0) requests,COALESCE(SUM(successes),0) successes,COALESCE(SUM(errors),0) errors,COALESCE(SUM(input_tokens),0) input_tokens,COALESCE(SUM(output_tokens),0) output_tokens FROM usage_daily').first();
     const count=await env.DB.prepare('SELECT COUNT(*) AS count FROM users').first();
-    return reply({days,total:{...totals,users:count?.count||0}});
+    const inputRate=Number(env.GEMINI_INPUT_USD_PER_MTOK);
+    const outputRate=Number(env.GEMINI_OUTPUT_USD_PER_MTOK);
+    const configured=env.GEMINI_INPUT_USD_PER_MTOK!=null && env.GEMINI_OUTPUT_USD_PER_MTOK!=null &&
+      Number.isFinite(inputRate) && Number.isFinite(outputRate) &&
+      inputRate>=0 && outputRate>=0 && inputRate<=100 && outputRate<=100;
+    const estimatedCost=configured ?
+      Math.round((Number(totals.input_tokens||0)*inputRate+
+        Number(totals.output_tokens||0)*outputRate)/1000000*100000)/100000 : null;
+    return reply({days,total:{...totals,users:count?.count||0,
+      estimated_paid_cost_usd:estimatedCost}});
   }
   if(request.method==='GET' && path==='/admin/api/users') {
     const users=(await env.DB.prepare('SELECT uid,email,plan,credit_balance,last_active_at FROM users ORDER BY last_active_at DESC LIMIT 100').all()).results;
