@@ -27,23 +27,25 @@
 
 ## Firebase Authentication
 
-1. Conectar plugin Firebase ao ChatGPT (se disponível) ou abrir console.firebase.google.com.
-2. Criar projeto Firebase e app Android com package name `app.lembreai.lembreai` (confirmar identificador no Android gerado).
-3. Ativar login com e-mail/senha e com Google; configurar SHA-1/SHA-256 da **assinatura de release fixa**.
-4. Habilitar autenticação por Firebase no APK via configuração do projeto. Não inserir nenhuma senha privada nos sources.
-5. Integrar verificação de ID token no Worker; **somente depois** ativar identidade, créditos, limites e lançamentos por usuário.
-6. Não salvar senhas no D1.
+1. A instalação do plugin Firebase no ChatGPT não é necessária para o aplicativo; o código usa o serviço oficial Firebase Authentication pela API REST.
+2. Criar projeto Firebase e app Android com package name `app.lembreai.lembreai`.
+3. Ativar login com e-mail/senha e com Google; configurar SHA-1/SHA-256 da assinatura usada para compilar a beta.
+4. Cadastrar `FIREBASE_WEB_API_KEY` e `GOOGLE_WEB_CLIENT_ID` como GitHub Actions Secrets. Cadastrar `FIREBASE_WEB_API_KEY` também como secret do Worker Cloudflare.
+5. O Worker valida o ID token com o Identity Toolkit antes de registrar o UID e o e-mail. O D1 nunca armazena senhas.
+6. A assinatura da compilação e o SHA-1 precisam permanecer iguais para o login Google e as atualizações do APK continuarem funcionando.
+
+Antes de publicar esta alteração, aplicar as migrações D1 na pasta `backend` (`npx wrangler d1 migrations apply lembreai-operacoes --remote`) e cadastrar `FIREBASE_WEB_API_KEY` como secret do Worker (`npx wrangler secret put FIREBASE_WEB_API_KEY`). Sem esses passos, o login pode autenticar no Firebase, mas as rotas de conta e métricas por usuário não ficam disponíveis.
 
 ## Google AdMob: anúncios recompensados
 
 1. Criar conta em https://admob.google.com.
 2. Apps > Add app > Android > **não publicado** e criar LembreAI.
-3. Criar bloco de **Rewarded** e configurar **server-side verification (SSV)** para endpoint seguro no backend. Não usar client-side onUserEarnedReward como prova de crédito.
+3. Criar bloco de **Rewarded** e configurar **server-side verification (SSV)** para `https://lembreai-ia.hayslan08.workers.dev/admob/ssv`. Não usar o callback do aparelho como prova de crédito.
 4. Enquanto não passar pela revisão e loja compatível, continuar com IDs oficiais de teste e **não prometer renda**.
-5. Quando aprovado, cadastrar IDs reais via configuração de build; nunca testar clicando anúncios reais.
+5. Quando aprovado, cadastrar `ADMOB_APPLICATION_ID` e `ADMOB_REWARDED_AD_UNIT_ID` como GitHub Actions Secrets e `ADMOB_REWARDED_AD_UNIT_ID` como variável do Worker. Nunca testar clicando anúncios reais.
 6. Antes de exibir anúncios comerciais, configurar consentimento UMP, aviso de privacidade e app-ads.txt no domínio indicado pelo AdMob.
 
-Regras propostas: 1 anúncio **verificado via SSV** = 1 lembrete extra por 24 horas, no máximo 3 anúncios premiados por dia. O uso real depende de login verificado, idempotência de transação AdMob, controle de expiração e auditoria de saldo no D1.
+Regra preparada no código: 1 anúncio **verificado via SSV** = 1 crédito para um lembrete além do limite gratuito, válido por 24 horas, no máximo 3 sessões de anúncio por dia. O Worker exige login Firebase, vincula o retorno SSV a uma sessão criada no servidor, rejeita reutilização de transação e registra o crédito no livro de auditoria D1. Isso só fica ativo depois de aplicar a migração, configurar Firebase e AdMob, e publicar o Worker atualizado.
 
 ## Cuidados importantes
 

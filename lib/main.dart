@@ -680,8 +680,8 @@ class _MainScreenState extends State<MainScreen> {
         bot(upcomingSummary());return;
       } else if (RegExp(r'^(oi|olá|ola|bom dia|boa tarde|boa noite|e aí|eai|tudo bem)[!?.\s]*$')
           .hasMatch(message.toLowerCase().trim())) {
-        bot('Oi! 💜 Podemos conversar normalmente. Também posso te ajudar '
-          'com agenda, provas e compromissos.');
+        bot('Oi! 💜 Sou sua assistente de agendamentos. Posso ajudar a criar, '
+          'consultar, alterar ou cancelar lembretes.');
         return;
       }
       final local=online==null ? parseReminder(message,now) : null;
@@ -711,11 +711,8 @@ class _MainScreenState extends State<MainScreen> {
         return;
       }
       final slots=freeActiveReminderLimit-reminders.where((r)=>!r.done).length;
-      if (unique.length>slots) {
-        bot('Encontrei '+unique.length.toString()+' compromissos, mas restam apenas '
-          +slots.toString()+' vagas no plano gratuito. Conclua lembretes antigos antes de importar.');
-        return;
-      }
+      final freeSlots=slots>0 ? slots : 0;
+      final creditsNeeded=unique.length>freeSlots ? unique.length-freeSlots : 0;
       if (photo!=null || unique.length>1) {
         final details=unique.map((r)=>'• '+r.title+'\n  '+formatted(r.when)+
           (r.location.isEmpty ? '' : '\n  Local: '+r.location)).join('\n\n');
@@ -734,6 +731,14 @@ class _MainScreenState extends State<MainScreen> {
       }
       setState(()=>reminders.addAll(added));
       await save();
+      if (creditsNeeded>0 && !await AccountService.consumeCredits(creditsNeeded)) {
+        setState(()=>reminders.removeWhere((r)=>added.any((a)=>a.id==r.id)));
+        await save();
+        bot('Encontrei '+unique.length.toString()+' compromissos, mas faltam créditos para '
+          'ultrapassar o limite de 10 lembretes ativos. Conclua lembretes antigos ou assista '
+          'a um anúncio premiado depois que a conta estiver configurada.');
+        return;
+      }
       final failures=<String>[];
       for (final r in added) {
         try {

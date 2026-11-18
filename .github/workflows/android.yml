@@ -23,10 +23,13 @@ jobs:
       - name: Criar arquivos nativos Android
         run: flutter create --platforms=android --project-name=lembreai --org=app.lembreai --no-pub .
       - name: Configurar Android
+        env:
+          ADMOB_APPLICATION_ID: ${{ secrets.ADMOB_APPLICATION_ID }}
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import os
           p = Path('android/app/src/main/AndroidManifest.xml')
           s = p.read_text()
           s = s.replace('<application', '<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />\n    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />\n    <application', 1)
@@ -40,8 +43,14 @@ jobs:
             </application>''', 1)
           # Sem backup automatico de texto e agenda em nuvem pelo Android.
           s = s.replace('<application', '<application android:allowBackup="false"', 1)
-          # Apenas ID oficial de teste — nao veicula anuncios comerciais.
-          s = s.replace('</application>', '<meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="ca-app-pub-3940256099942544~3347511713" />\\n</application>', 1)
+          # Usa o ID real somente quando o proprietário configurar o segredo; caso
+          # contrário, mantém o ID oficial de teste do Google.
+          admob_app_id = os.environ.get('ADMOB_APPLICATION_ID', '').strip()
+          if not admob_app_id:
+              admob_app_id = 'ca-app-pub-3940256099942544~3347511713'
+          if not admob_app_id.startswith('ca-app-pub-') or '"' in admob_app_id:
+              raise SystemExit('ADMOB_APPLICATION_ID inválido')
+          s = s.replace('</application>', f'<meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="{admob_app_id}" />\\n</application>', 1)
           p.write_text(s)
           # Usar o ícone oficial da marca em vez do logo Flutter padrão.
           brand_icon = Path('assets/branding/lembreai_logo.png').read_bytes()
@@ -75,7 +84,16 @@ jobs:
       - name: Testar acesso protegido ao painel administrativo
         run: node backend/admin-live-smoke.mjs
       - name: Compilar APK
-        run: flutter build apk --debug --dart-define=AI_SERVER_URL="https://lembreai-ia.hayslan08.workers.dev"
+        env:
+          FIREBASE_WEB_API_KEY: ${{ secrets.FIREBASE_WEB_API_KEY }}
+          GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID }}
+          ADMOB_REWARDED_AD_UNIT_ID: ${{ secrets.ADMOB_REWARDED_AD_UNIT_ID }}
+        run: >-
+          flutter build apk --debug
+          --dart-define=AI_SERVER_URL="https://lembreai-ia.hayslan08.workers.dev"
+          --dart-define=FIREBASE_WEB_API_KEY="$FIREBASE_WEB_API_KEY"
+          --dart-define=GOOGLE_WEB_CLIENT_ID="$GOOGLE_WEB_CLIENT_ID"
+          --dart-define=ADMOB_REWARDED_AD_UNIT_ID="$ADMOB_REWARDED_AD_UNIT_ID"
       - name: Enviar APK
         uses: actions/upload-artifact@v4
         with:

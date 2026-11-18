@@ -55,7 +55,7 @@ Sem preço por token configurado, não calculamos um valor fictício.</p>
 <p class="muted">O app beta guarda compromissos no celular.
 Identificação individual depende do Firebase Authentication.
 Somente créditos de contas verificadas poderão ser lançados.</p>
-<table><thead><tr><th>ID</th><th>E-mail</th><th>Plano</th><th>Créditos</th><th>Último uso</th></tr></thead>
+<table><thead><tr><th>ID</th><th>E-mail</th><th>Plano</th><th>Créditos ativos</th><th>Pedidos IA</th><th>Tokens entrada</th><th>Tokens saída</th><th>Último uso</th><th>Custo estimado (USD)</th></tr></thead>
 <tbody id="users"></tbody></table></section>
 <section><h2>Conceder créditos com auditoria</h2>
 <form id="grant"><input required id="uid" placeholder="UID autenticado" autocomplete="off">
@@ -89,7 +89,7 @@ async function load(){
  el('estimatedCost').textContent=s.total.estimated_paid_cost_usd==null?'Não configurado':
    '$ '+Number(s.total.estimated_paid_cost_usd).toFixed(5);
  table('days',s.days,['day','requests','successes','errors','input_tokens','output_tokens','image_requests']);
- table('users',u.users,['uid','email','plan','credit_balance','last_active_at']);
+ table('users',u.users,['uid','email','plan','credit_balance','requests','input_tokens','output_tokens','last_active_at','estimated_paid_cost_usd']);
  table('purchases',p.purchases,['user_uid','plan','status','price_cents','created_at']);
  el('status').textContent='Dados atualizados com segurança.';
  }catch(e){el('status').textContent=e.message;}
@@ -138,7 +138,21 @@ export async function handleAdmin(request,env,ctx) {
       estimated_paid_cost_usd:estimatedCost}});
   }
   if(request.method==='GET' && path==='/admin/api/users') {
-    const users=(await env.DB.prepare('SELECT uid,email,plan,credit_balance,last_active_at FROM users ORDER BY last_active_at DESC LIMIT 100').all()).results;
+    const rows=(await env.DB.prepare(`SELECT u.uid,u.email,u.plan,
+      COALESCE((SELECT SUM(c.delta) FROM credit_ledger c WHERE c.user_uid=u.uid
+        AND (c.expires_at IS NULL OR datetime(c.expires_at)>CURRENT_TIMESTAMP)),0) credit_balance,
+      u.last_active_at,COALESCE(SUM(d.requests),0) requests,
+      COALESCE(SUM(d.input_tokens),0) input_tokens,
+      COALESCE(SUM(d.output_tokens),0) output_tokens
+      FROM users u LEFT JOIN usage_user_daily d ON d.user_uid=u.uid
+      GROUP BY u.uid ORDER BY u.last_active_at DESC LIMIT 100`).all()).results;
+    const inputRate=Number(env.GEMINI_INPUT_USD_PER_MTOK);
+    const outputRate=Number(env.GEMINI_OUTPUT_USD_PER_MTOK);
+    const configured=env.GEMINI_INPUT_USD_PER_MTOK!=null && env.GEMINI_OUTPUT_USD_PER_MTOK!=null &&
+      Number.isFinite(inputRate) && Number.isFinite(outputRate) &&
+      inputRate>=0 && outputRate>=0 && inputRate<=100 && outputRate<=100;
+    const users=rows.map(user=>({...user,estimated_paid_cost_usd:configured?
+      Math.round((Number(user.input_tokens)*inputRate+Number(user.output_tokens)*outputRate)/1000000*100000)/100000:null}));
     return reply({users});
   }
   if(request.method==='GET' && path==='/admin/api/purchases') {
@@ -163,14 +177,14 @@ export async function handleAdmin(request,env,ctx) {
     const ref='admin:'+crypto.randomUUID();
     await env.DB.batch([
       env.DB.prepare("INSERT INTO credit_ledger(user_uid,event_type,delta,reference_id,actor) VALUES(?,'admin_grant',?,?,?)").bind(uid,credits,ref,email),
-      env.DB.prepare("UPDATE users SET credit_balance=(SELECT COALESCE(SUM(delta),0) FROM credit_ledger WHERE user_uid=?) WHERE uid=?").bind(uid,uid),
+      env.DB.prepare("UPDATE users SET credit_balance=(SELECT COALESCE(SUM(delta),0) FROM credit_ledger WHERE user_uid=? AND (expires_at IS NULL OR datetime(expires_at)>CURRENT_TIMESTAMP)) WHERE uid=?").bind(uid,uid),
     ]);
     return reply({ok:true,reference:ref});
   }
   return reply({error:'Rota administrativa não encontrada.'},404);
 }
 
-export async function recordUsage(env,{success,inputTokens=0,outputTokens=0,hasImage=false}={}) {
+export async function recordUsage(env,{success,inputTokens=0,outputTokens=0,hasImage=false,user=null}={}) {
   if(!env.DB)return;
   const day=new Date().toISOString().slice(0,10);
   const int=(x)=>Number.isSafeInteger(x)&&x>=0?Math.min(x,2000000):0;
@@ -181,4 +195,14 @@ export async function recordUsage(env,{success,inputTokens=0,outputTokens=0,hasI
       output_tokens=output_tokens+excluded.output_tokens,image_requests=image_requests+excluded.image_requests,
       updated_at=CURRENT_TIMESTAMP`)
     .bind(day,success?1:0,success?0:1,int(inputTokens),int(outputTokens),hasImage?1:0).run();
+  if(user?.uid) {
+    await env.DB.prepare(`INSERT INTO usage_user_daily(day,user_uid,requests,successes,errors,input_tokens,output_tokens,image_requests,updated_at)
+      VALUES(?,?,1,?,?,?,?,?,CURRENT_TIMESTAMP)
+      ON CONFLICT(day,user_uid) DO UPDATE SET requests=requests+1,
+        successes=successes+excluded.successes,errors=errors+excluded.errors,
+        input_tokens=input_tokens+excluded.input_tokens,
+        output_tokens=output_tokens+excluded.output_tokens,
+        image_requests=image_requests+excluded.image_requests,updated_at=CURRENT_TIMESTAMP`)
+      .bind(day,user.uid,success?1:0,success?0:1,int(inputTokens),int(outputTokens),hasImage?1:0).run();
+  }
 }
