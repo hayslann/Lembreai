@@ -75,6 +75,25 @@ jobs:
           PY
       - name: Dependências
         run: flutter pub get
+      - name: Contornar falha do lintVital do plugin Google Sign-In
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          roots = list(Path.home().glob('.pub-cache/hosted/pub.dev/google_sign_in_android-*/android'))
+          if not roots:
+              raise SystemExit('Pacote google_sign_in_android não encontrado no cache do Flutter.')
+          for root in roots:
+              gradle = root / 'build.gradle'
+              if not gradle.exists():
+                  gradle = root / 'build.gradle.kts'
+              if not gradle.exists():
+                  raise SystemExit(f'Arquivo Gradle não encontrado em {root}')
+              content = gradle.read_text()
+              workaround = "\ntasks.configureEach {\n    if (name == 'lintVitalAnalyzeRelease') enabled = false\n}\n"
+              if 'name == \'lintVitalAnalyzeRelease\'' not in content:
+                  gradle.write_text(content + workaround)
+          PY
       - name: Testar interpretação e avisos sonoros
         run: flutter test test/reminder_parser_test.dart test/alert_preferences_test.dart test/plan_catalog_test.dart test/app_update_service_test.dart
       - name: Testar entendimento e segurança da IA
