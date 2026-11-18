@@ -63,7 +63,9 @@ class _RewardedAdDemoState extends State<RewardedAdDemo>{
                   message('Anúncio de teste concluído. Nenhum crédito real foi liberado.');
                   return;
                 }
-                message(await _waitForVerifiedReward(session!));
+                message(await _waitForVerifiedReward(
+                  session!['customData'] as String,
+                ));
               },
               onAdFailedToShowFullScreenContent:(value,error){
                 value.dispose();ad=null;
