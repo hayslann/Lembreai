@@ -38,16 +38,23 @@ As ações de crédito e bloqueio requerem a migração `0003_admin_actions.sql`
 5. O Worker valida o ID token com o Identity Toolkit antes de registrar o UID e o e-mail. O D1 nunca armazena senhas.
 6. A assinatura da compilação e o SHA-1 precisam permanecer iguais para o login Google e as atualizações do APK continuarem funcionando.
 
+## Assinatura estável e atualização do APK
+
+- As versões anteriores da beta foram compiladas como `debug` pelo GitHub Actions. Cada execução usou uma chave temporária diferente; por isso o Android não consegue instalar essas versões por cima umas das outras.
+- Para os próximos APKs instalarem por cima e preservarem os dados locais, configure no repositório GitHub `hayslann/Lembreai` os secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` e `ANDROID_KEY_PASSWORD`. O workflow passa a gerar APK `release` com essa mesma chave e só atualiza o link de download quando a assinatura está configurada.
+- A chave privada deve ficar apenas no secret do GitHub; não a coloque no código ou em arquivos versionados. Registre também os SHA-1/SHA-256 dessa chave nas configurações do app Android no Firebase para manter o login Google.
+- **Migração da versão já instalada:** como a chave temporária da APK antiga não pode ser recuperada, instalar a primeira versão com assinatura estável exige remover a beta antiga uma única vez. Remover o app apaga os lembretes guardados localmente; depois dessa migração, as próximas versões poderão ser instaladas pelo botão Atualizar sem desinstalar.
+
 Antes de publicar esta alteração, aplicar as migrações D1 na pasta `backend` (`npx wrangler d1 migrations apply lembreai-operacoes --remote`) e cadastrar `FIREBASE_WEB_API_KEY` como secret do Worker (`npx wrangler secret put FIREBASE_WEB_API_KEY`). Sem esses passos, o login pode autenticar no Firebase, mas as rotas de conta e métricas por usuário não ficam disponíveis.
 
 ## Google AdMob: anúncios recompensados
 
-1. Criar conta em https://admob.google.com.
-2. Apps > Add app > Android > **não publicado** e criar LembreAI.
-3. Criar bloco de **Rewarded** e configurar **server-side verification (SSV)** para `https://lembreai-ia.hayslan08.workers.dev/admob/ssv`. Não usar o callback do aparelho como prova de crédito.
-4. Enquanto não passar pela revisão e loja compatível, continuar com IDs oficiais de teste e **não prometer renda**.
-5. Quando aprovado, cadastrar `ADMOB_APPLICATION_ID` e `ADMOB_REWARDED_AD_UNIT_ID` como GitHub Actions Secrets e `ADMOB_REWARDED_AD_UNIT_ID` como variável do Worker. Nunca testar clicando anúncios reais.
-6. Antes de exibir anúncios comerciais, configurar consentimento UMP, aviso de privacidade e app-ads.txt no domínio indicado pelo AdMob.
+1. Conta AdMob e app Android **não publicado** `LembreAI` já cadastrados. ID do app: `ca-app-pub-9334057482133217~5852596397`.
+2. Bloco **Rewarded** `Lembrete extra - recompensado` criado para 1 `lembrete_extra`. ID: `ca-app-pub-9334057482133217/5258921211`.
+3. Callback SSV `https://lembreai-ia.hayslan08.workers.dev/admob/ssv` foi verificado e salvo no bloco. O Worker verifica assinatura Google, sessão vinculada e duplicidade; a variável secreta `ADMOB_REWARDED_AD_UNIT_ID` foi configurada com o número do bloco para impedir créditos vindos de outro bloco.
+4. A conta ainda informa análise de dados e perfil de pagamento incompleto. Até concluir esses requisitos e a análise do app, manter os IDs oficiais de teste no APK e não prometer renda. A unidade real pode demorar até uma hora para começar a preencher anúncios.
+5. Quando aprovado, cadastrar `ADMOB_APPLICATION_ID` e `ADMOB_REWARDED_AD_UNIT_ID` como GitHub Actions Secrets. Nunca testar clicando anúncios reais.
+6. Antes de anúncios comerciais, configurar consentimento UMP, aviso de privacidade e app-ads.txt no domínio indicado pelo AdMob.
 
 Regra preparada no código: 1 anúncio **verificado via SSV** = 1 crédito para um lembrete além do limite gratuito, válido por 24 horas, no máximo 3 sessões de anúncio por dia. O Worker exige login Firebase, vincula o retorno SSV a uma sessão criada no servidor, rejeita reutilização de transação e registra o crédito no livro de auditoria D1. Isso só fica ativo depois de aplicar a migração, configurar Firebase e AdMob, e publicar o Worker atualizado.
 
