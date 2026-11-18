@@ -15,6 +15,7 @@ import 'plan_catalog.dart';
 import 'legal_text.dart';
 import 'account_screen.dart';
 import 'test_ad_banner.dart';
+import 'app_update_service.dart';
 
 final alarms = FlutterLocalNotificationsPlugin();
 
@@ -211,6 +212,9 @@ class _MainScreenState extends State<MainScreen> {
   bool termsAccepted = false;
   bool termsChecked = false;
   bool consentTestAds = false;
+  AppUpdate? availableUpdate;
+  bool updateBusy = false;
+  double downloadProgress = 0;
   Uint8List? attachedPhoto;
   String? attachedMime;
   String? attachedName;
@@ -275,7 +279,7 @@ class _MainScreenState extends State<MainScreen> {
       loaded = true;
     });
     scrollToLatest();
-
+    checkUpdates(silent: true);
   }
   Future<void> save() async {
     final prefs = await SharedPreferences.getInstance();
@@ -405,6 +409,66 @@ class _MainScreenState extends State<MainScreen> {
         ),
       ),
     );
+  }
+
+  /// Verifica novas versoes sem interromper o cliente.
+  Future<void> checkUpdates({bool silent=false}) async {
+    if (updateBusy) return;
+    setState(() => updateBusy=true);
+    try {
+      final latest=await AppUpdateService.check();
+      if (!mounted) return;
+      setState(() => availableUpdate=latest);
+      if (!silent && latest == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Você já está com a versão mais recente do LembreAI.')));
+      }
+    } catch (_) {
+      if (!mounted || silent) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Não consegui conferir atualizações agora. '
+          'Verifique a internet e tente novamente.')));
+    } finally {
+      if (mounted) setState(() => updateBusy=false);
+    }
+  }
+
+  Future<void> installAvailableUpdate() async {
+    final update=availableUpdate;
+    if (update==null || updateBusy) return;
+    final approved=await showDialog<bool>(
+      context:context,
+      builder:(ctx)=>AlertDialog(
+        title:Text('Atualizar para LembreAI ${update.version}?'),
+        content:const Text('O LembreAI vai baixar a atualização diretamente '
+          'do GitHub e verificar a integridade do APK. '
+          'Depois, o Android pedirá sua confirmação para instalar. '
+          '\\n\\nIMPORTANTE: as versões de teste anteriores podem ter '
+          'assinaturas diferentes. Se o Android rejeitar a atualização, '
+          'não desinstale sem salvar seus lembretes.'),
+        actions:[
+          TextButton(onPressed:()=>Navigator.pop(ctx,false),
+            child:const Text('Agora não')),
+          FilledButton(onPressed:()=>Navigator.pop(ctx,true),
+            child:const Text('Baixar e atualizar')),
+        ],
+      ),
+    ) ?? false;
+    if (!approved || !mounted) return;
+    setState(() { updateBusy=true; downloadProgress=0; });
+    try {
+      await AppUpdateService.downloadAndInstall(update,onProgress:(value){
+        if(mounted && (value>=1 || value-downloadProgress>=0.025)) {
+          setState(()=>downloadProgress=value);
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content:Text(e.toString().replaceFirst('Bad state: ',''))));
+    } finally {
+      if (mounted) setState(() => updateBusy=false);
+    }
   }
 
   Future<void> showPreferences() async {
@@ -854,6 +918,13 @@ class _MainScreenState extends State<MainScreen> {
             MaterialPageRoute(builder: (_) => const AccountScreen())),
             tooltip: 'Minha conta',
             icon: const Icon(Icons.person_outline)),
+          IconButton(
+            onPressed:updateBusy?null:()=>checkUpdates(),
+            tooltip:'Verificar atualizações do LembreAI',
+            icon:Icon(availableUpdate==null
+              ? Icons.system_update_alt
+              : Icons.notification_important_outlined),
+          ),
           IconButton(onPressed: showPlans,
             tooltip: 'Planos e limites',
             icon: const Icon(Icons.workspace_premium_outlined)),
@@ -867,6 +938,24 @@ class _MainScreenState extends State<MainScreen> {
             child: Center(child: Text(name))),
         ]),
       body: page == 0 ? Column(children: [
+        if(availableUpdate != null)
+          MaterialBanner(
+            leading:const Icon(Icons.system_update_alt),
+            content:Text('Versão ${availableUpdate!.version} disponível!'),
+            actions:[
+              TextButton(
+                onPressed:updateBusy?null:installAvailableUpdate,
+                child:const Text('ATUALIZAR AGORA'),
+              ),
+              TextButton(
+                onPressed:()=>setState(()=>availableUpdate=null),
+                child:const Text('Depois'),
+              ),
+            ],
+          ),
+        if(updateBusy && downloadProgress>0)
+          LinearProgressIndicator(value:downloadProgress),
+
         Expanded(child: ListView.builder(
           controller:chatScroll,
           padding: const EdgeInsets.all(16), itemCount: messages.length,
