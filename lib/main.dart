@@ -15,6 +15,7 @@ import 'plan_catalog.dart';
 import 'legal_text.dart';
 import 'account_screen.dart';
 import 'test_ad_banner.dart';
+import 'rewarded_ad_demo.dart';
 import 'app_update_service.dart';
 
 final alarms = FlutterLocalNotificationsPlugin();
@@ -398,6 +399,7 @@ class _MainScreenState extends State<MainScreen> {
                     ' lembretes ativos'+
                     (plan.available?' • disponível':' • em preparação')),
                 )),
+              const RewardedAdDemo(),
               const SizedBox(height:8),
               const Text('Os avisos não são garantidos em situações de '
                 'bateria descarregada, falta de permissão ou restrições do Android.'),
