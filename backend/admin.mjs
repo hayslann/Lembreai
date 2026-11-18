@@ -7,6 +7,24 @@ function reply(data,status=200) {
   });
 }
 function deny() {return reply({error:'Acesso administrativo negado.'},403);}
+function validAdminPost(request,url) {
+  return request.headers.get('Origin')===url.origin &&
+    request.headers.get('Content-Type')?.startsWith('application/json');
+}
+async function githubApkDownloads(env) {
+  const owner=env.GITHUB_OWNER||'hayslann';
+  const repo=env.GITHUB_REPO||'Lembreai';
+  const tag=env.GITHUB_RELEASE_TAG||'teste-android';
+  try {
+    const response=await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases/tags/${encodeURIComponent(tag)}`,{
+      headers:{Accept:'application/vnd.github+json','User-Agent':'LembreAI-admin'},
+      signal:AbortSignal.timeout(5000),
+    });
+    if(!response.ok)return null;
+    const release=await response.json();
+    return Array.isArray(release.assets)?release.assets.reduce((n,a)=>n+(Number(a.download_count)||0),0):null;
+  } catch (_) {return null;}
+}
 export async function authenticateAdmin(env,ctx) {
   if (!env.ADMIN_EMAIL || typeof env.ADMIN_EMAIL!=='string' || !ctx?.access) return null;
   try {
@@ -45,6 +63,10 @@ small,.muted{color:#baaccc}#status{margin:15px 0;color:#d8caff}
 <article>Tokens de saída<div class="number" id="outTokens">—</div></article>
 <article>Estimativa em USD (tabela paga)<div class="number" id="estimatedCost">—</div></article>
 <article>Usuários identificados<div class="number" id="usersCount">—</div></article>
+<article>Ativos nos últimos 5 min<div class="number" id="onlineUsers">—</div></article>
+<article>Contas bloqueadas<div class="number" id="blockedUsers">—</div></article>
+<article>Créditos ativos<div class="number" id="creditsActive">—</div></article>
+<article>Downloads do APK no GitHub<div class="number" id="downloads">—</div></article>
 </div>
 <section><h2>Consumo de IA — últimos 30 dias</h2>
 <p class="muted">Custos de Gemini/Cloudflare: consulte as faturas reais.
@@ -55,13 +77,17 @@ Sem preço por token configurado, não calculamos um valor fictício.</p>
 <p class="muted">O app beta guarda compromissos no celular.
 Identificação individual depende do Firebase Authentication.
 Somente créditos de contas verificadas poderão ser lançados.</p>
-<table><thead><tr><th>ID</th><th>E-mail</th><th>Plano</th><th>Créditos ativos</th><th>Pedidos IA</th><th>Tokens entrada</th><th>Tokens saída</th><th>Último uso</th><th>Custo estimado (USD)</th></tr></thead>
+<table><thead><tr><th>ID</th><th>E-mail</th><th>Plano</th><th>Status</th><th>Créditos ativos</th><th>Pedidos IA</th><th>Tokens entrada</th><th>Tokens saída</th><th>Último uso</th><th>Custo estimado (USD)</th><th>Ação</th></tr></thead>
 <tbody id="users"></tbody></table></section>
-<section><h2>Conceder créditos com auditoria</h2>
+<section><h2>Administrar créditos com auditoria</h2>
 <form id="grant"><input required id="uid" placeholder="UID autenticado" autocomplete="off">
 <input required id="points" type="number" min="1" max="1000" placeholder="Créditos (1–1000)">
-<button type="submit">Adicionar créditos</button></form>
-<p class="muted">Apenas contas que já existam no banco podem receber créditos. Ação registrada.</p></section>
+<select id="creditAction" aria-label="Operação de crédito"><option value="add">Adicionar</option><option value="remove">Retirar</option></select>
+<button type="submit">Aplicar alteração</button></form>
+<p class="muted">Apenas contas cadastradas. Retiradas respeitam o saldo e ficam registradas com administrador, usuário e data.</p></section>
+<section><h2>Auditoria administrativa</h2>
+<table><thead><tr><th>Data</th><th>Administrador</th><th>E-mail do usuário</th><th>UID</th><th>Ação</th><th>Quantidade</th></tr></thead>
+<tbody id="actions"></tbody></table></section>
 <section><h2>Histórico de contratações verificadas</h2>
 <table><thead><tr><th>Usuário</th><th>Plano</th><th>Status</th><th>Valor</th><th>Data</th></tr></thead>
 <tbody id="purchases"></tbody></table>
@@ -80,33 +106,54 @@ async function get(path){const res=await fetch(path,{credentials:'same-origin',c
 async function load(){
  el('status').textContent='Consultando banco de dados...';
  try{
- const [s,u,p]=await Promise.all([
-   get('/admin/api/summary'),get('/admin/api/users'),get('/admin/api/purchases')]);
+ const [s,u,p,a]=await Promise.all([
+   get('/admin/api/summary'),get('/admin/api/users'),get('/admin/api/purchases'),get('/admin/api/actions')]);
  for(const id of ['requests','successes','errors','inTokens','outTokens','usersCount']) {
   const prop={inTokens:'input_tokens',outTokens:'output_tokens',usersCount:'users'}[id]||id;
   el(id).textContent=fmt(s.total[prop]);
  }
  el('estimatedCost').textContent=s.total.estimated_paid_cost_usd==null?'Não configurado':
    '$ '+Number(s.total.estimated_paid_cost_usd).toFixed(5);
+ el('onlineUsers').textContent=fmt(s.total.active_last_5m);
+ el('blockedUsers').textContent=fmt(s.total.blocked_users);
+ el('creditsActive').textContent=fmt(s.total.active_credits);
+ el('downloads').textContent=s.total.apk_downloads==null?'Indisponível':fmt(s.total.apk_downloads);
  table('days',s.days,['day','requests','successes','errors','input_tokens','output_tokens','image_requests']);
- table('users',u.users,['uid','email','plan','credit_balance','requests','input_tokens','output_tokens','last_active_at','estimated_paid_cost_usd']);
- table('purchases',p.purchases,['user_uid','plan','status','price_cents','created_at']);
+ const userBody=el('users');userBody.replaceChildren();
+ for(const user of u.users){const tr=document.createElement('tr');
+  for(const value of [user.uid,user.email,user.plan,user.account_status,user.credit_balance,user.requests,user.input_tokens,user.output_tokens,user.last_active_at,user.estimated_paid_cost_usd])tr.appendChild(cell(value));
+  const action=document.createElement('td');const button=document.createElement('button');
+  button.textContent=user.account_status==='blocked'?'Desbloquear':'Bloquear';button.dataset.uid=user.uid;
+  button.onclick=()=>setAccountStatus(user.uid,user.account_status==='blocked'?'active':'blocked');
+  action.appendChild(button);tr.appendChild(action);userBody.appendChild(tr);
+ }
+ table('purchases',p.purchases,['user_uid','plan','status','amount_display','created_at']);
+ table('actions',a.actions,['created_at','actor_email','target_email','target_uid','action_type','amount']);
  el('status').textContent='Dados atualizados com segurança.';
  }catch(e){el('status').textContent=e.message;}
 }
 el('refresh').onclick=load;
 el('grant').onsubmit=async(e)=>{
  e.preventDefault();
- const uid=el('uid').value.trim();const credits=Number(el('points').value);
- if(!confirm('Conceder '+credits+' créditos para '+uid+'?'))return;
+ const uid=el('uid').value.trim();const credits=Number(el('points').value);const operation=el('creditAction').value;
+ if(!confirm((operation==='add'?'Adicionar ':'Retirar ')+credits+' créditos '+(operation==='add'?'para ':'de ')+uid+'?'))return;
  try {
   const res=await fetch('/admin/api/credits',{method:'POST',credentials:'same-origin',
-    headers:{'Content-Type':'application/json'},body:JSON.stringify({uid,credits})});
+    headers:{'Content-Type':'application/json'},body:JSON.stringify({uid,credits,operation})});
   const value=await res.json();if(!res.ok)throw Error(value.error||'Falha');
-  el('status').textContent='Créditos registrados no livro de auditoria.';
+  el('status').textContent='Alteração de créditos registrada no livro de auditoria.';
   await load();
  }catch(err){el('status').textContent=err.message;}
 };
+async function setAccountStatus(uid,status){
+ const label=status==='blocked'?'bloquear':'desbloquear';
+ if(!confirm('Deseja '+label+' a conta '+uid+'?'))return;
+ try{const res=await fetch('/admin/api/users/status',{method:'POST',credentials:'same-origin',
+   headers:{'Content-Type':'application/json'},body:JSON.stringify({uid,status})});
+   const value=await res.json();if(!res.ok)throw Error(value.error||'Falha');
+   el('status').textContent='Status da conta atualizado e auditado.';await load();
+ }catch(err){el('status').textContent=err.message;}
+}
 load();
 </script></body></html>`;
 
@@ -126,6 +173,13 @@ export async function handleAdmin(request,env,ctx) {
     const days=(await env.DB.prepare('SELECT day,requests,successes,errors,input_tokens,output_tokens,image_requests FROM usage_daily ORDER BY day DESC LIMIT 30').all()).results;
     const totals=await env.DB.prepare('SELECT COALESCE(SUM(requests),0) requests,COALESCE(SUM(successes),0) successes,COALESCE(SUM(errors),0) errors,COALESCE(SUM(input_tokens),0) input_tokens,COALESCE(SUM(output_tokens),0) output_tokens FROM usage_daily').first();
     const count=await env.DB.prepare('SELECT COUNT(*) AS count FROM users').first();
+    const presence=await env.DB.prepare(`SELECT
+      SUM(CASE WHEN account_status='blocked' THEN 1 ELSE 0 END) blocked_users,
+      SUM(CASE WHEN account_status='active' AND last_active_at>=datetime('now','-5 minutes') THEN 1 ELSE 0 END) active_last_5m
+      FROM users`).first();
+    const creditTotal=await env.DB.prepare(`SELECT COALESCE(SUM(delta),0) active_credits FROM credit_ledger
+      WHERE expires_at IS NULL OR datetime(expires_at)>CURRENT_TIMESTAMP`).first();
+    const downloads=await githubApkDownloads(env);
     const inputRate=Number(env.GEMINI_INPUT_USD_PER_MTOK);
     const outputRate=Number(env.GEMINI_OUTPUT_USD_PER_MTOK);
     const configured=env.GEMINI_INPUT_USD_PER_MTOK!=null && env.GEMINI_OUTPUT_USD_PER_MTOK!=null &&
@@ -135,10 +189,14 @@ export async function handleAdmin(request,env,ctx) {
       Math.round((Number(totals.input_tokens||0)*inputRate+
         Number(totals.output_tokens||0)*outputRate)/1000000*100000)/100000 : null;
     return reply({days,total:{...totals,users:count?.count||0,
+      active_last_5m:Number(presence?.active_last_5m||0),
+      blocked_users:Number(presence?.blocked_users||0),
+      active_credits:Number(creditTotal?.active_credits||0),apk_downloads:downloads,
       estimated_paid_cost_usd:estimatedCost}});
   }
   if(request.method==='GET' && path==='/admin/api/users') {
     const rows=(await env.DB.prepare(`SELECT u.uid,u.email,u.plan,
+      u.account_status,
       COALESCE((SELECT SUM(c.delta) FROM credit_ledger c WHERE c.user_uid=u.uid
         AND (c.expires_at IS NULL OR datetime(c.expires_at)>CURRENT_TIMESTAMP)),0) credit_balance,
       u.last_active_at,COALESCE(SUM(d.requests),0) requests,
@@ -156,30 +214,76 @@ export async function handleAdmin(request,env,ctx) {
     return reply({users});
   }
   if(request.method==='GET' && path==='/admin/api/purchases') {
-    const purchases=(await env.DB.prepare('SELECT user_uid,plan,status,price_cents,currency,created_at FROM purchase_records ORDER BY created_at DESC LIMIT 100').all()).results;
+    const purchases=(await env.DB.prepare('SELECT user_uid,plan,status,price_cents,currency,created_at FROM purchase_records ORDER BY created_at DESC LIMIT 100').all()).results
+      .map(p=>({...p,amount_display:p.price_cents==null?'—':new Intl.NumberFormat('pt-BR',{style:'currency',currency:p.currency||'BRL'}).format(Number(p.price_cents)/100)}));
     return reply({purchases});
   }
+  if(request.method==='GET' && path==='/admin/api/actions') {
+    const actions=(await env.DB.prepare(`SELECT a.created_at,a.actor_email,a.target_uid,
+      COALESCE(u.email,'—') target_email,a.action_type,a.amount
+      FROM admin_actions a LEFT JOIN users u ON u.uid=a.target_uid
+      ORDER BY a.created_at DESC LIMIT 100`).all()).results;
+    return reply({actions});
+  }
   if(request.method==='POST' && path==='/admin/api/credits') {
-    // O navegador autenticado envia somente pedidos originados deste painel.
-    if(request.headers.get('Origin')!==url.origin ||
-      !request.headers.get('Content-Type')?.startsWith('application/json')) {
+    if(!validAdminPost(request,url)) {
       return reply({error:'Origem inválida.'},403);
     }
     let data;
     try {data=await request.json();}catch(_){return reply({error:'JSON inválido.'},400);}
-    const uid=data?.uid, credits=data?.credits;
+    const uid=data?.uid, credits=data?.credits, operation=data?.operation||'add';
     if(typeof uid!=='string'||uid.length<5||uid.length>150||
        !/^[A-Za-z0-9:_-]+$/.test(uid)||
-       !Number.isInteger(credits)||credits<1||credits>1000)
+       !Number.isInteger(credits)||credits<1||credits>1000||!['add','remove'].includes(operation))
       return reply({error:'Usuário ou créditos inválidos.'},400);
-    const user=await env.DB.prepare("SELECT uid FROM users WHERE uid=? AND account_status='active'").bind(uid).first();
+    const user=await env.DB.prepare("SELECT uid FROM users WHERE uid=?"+(operation==='add'?" AND account_status='active'":'')).bind(uid).first();
     if(!user)return reply({error:'Usuário não cadastrado/autenticado.'},404);
     const ref='admin:'+crypto.randomUUID();
+    if(operation==='add') {
+      await env.DB.batch([
+        env.DB.prepare("INSERT INTO credit_ledger(user_uid,event_type,delta,reference_id,actor) VALUES(?,'admin_grant',?,?,?)").bind(uid,credits,ref,email),
+        env.DB.prepare("UPDATE users SET credit_balance=(SELECT COALESCE(SUM(delta),0) FROM credit_ledger WHERE user_uid=? AND (expires_at IS NULL OR datetime(expires_at)>CURRENT_TIMESTAMP)) WHERE uid=?").bind(uid,uid),
+        env.DB.prepare("INSERT INTO admin_actions(actor_email,target_uid,action_type,amount) VALUES(?,?,'credits_added',?)").bind(email,uid,credits),
+      ]);
+      return reply({ok:true,reference:ref});
+    }
+    const buckets=(await env.DB.prepare(`SELECT expires_at,SUM(delta) balance FROM credit_ledger
+      WHERE user_uid=? AND (expires_at IS NULL OR datetime(expires_at)>CURRENT_TIMESTAMP)
+      GROUP BY expires_at HAVING SUM(delta)>0
+      ORDER BY CASE WHEN expires_at IS NULL THEN 1 ELSE 0 END,datetime(expires_at)`)
+      .bind(uid).all()).results||[];
+    let remaining=credits;const debits=[];
+    for(const bucket of buckets){if(remaining<=0)break;const amount=Math.min(remaining,Number(bucket.balance)||0);
+      if(amount>0){debits.push({expiry:bucket.expires_at??null,amount});remaining-=amount;}}
+    if(remaining>0)return reply({error:'O usuário não tem créditos ativos suficientes.'},409);
+    const statements=debits.map((debit,index)=>env.DB.prepare(`INSERT INTO credit_ledger
+      (user_uid,event_type,delta,reference_id,actor,expires_at)
+      SELECT ?,'admin_remove',?,?,?,? WHERE (SELECT COALESCE(SUM(delta),0) FROM credit_ledger
+       WHERE user_uid=? AND expires_at IS ? AND (expires_at IS NULL OR datetime(expires_at)>CURRENT_TIMESTAMP))>=?`)
+      .bind(uid,-debit.amount,ref+':'+index,email,debit.expiry,uid,debit.expiry,debit.amount));
+    const results=await env.DB.batch(statements);
+    if(results.reduce((sum,result)=>sum+(result.meta?.changes||0),0)!==debits.length)
+      return reply({error:'O saldo mudou durante a operação. Atualize o painel e tente novamente.'},409);
     await env.DB.batch([
-      env.DB.prepare("INSERT INTO credit_ledger(user_uid,event_type,delta,reference_id,actor) VALUES(?,'admin_grant',?,?,?)").bind(uid,credits,ref,email),
       env.DB.prepare("UPDATE users SET credit_balance=(SELECT COALESCE(SUM(delta),0) FROM credit_ledger WHERE user_uid=? AND (expires_at IS NULL OR datetime(expires_at)>CURRENT_TIMESTAMP)) WHERE uid=?").bind(uid,uid),
+      env.DB.prepare("INSERT INTO admin_actions(actor_email,target_uid,action_type,amount) VALUES(?,?,'credits_removed',?)").bind(email,uid,-credits),
     ]);
     return reply({ok:true,reference:ref});
+  }
+  if(request.method==='POST' && path==='/admin/api/users/status') {
+    if(!validAdminPost(request,url))return reply({error:'Origem inválida.'},403);
+    let data;try{data=await request.json();}catch(_){return reply({error:'JSON inválido.'},400);}
+    const uid=data?.uid,status=data?.status;
+    if(typeof uid!=='string'||uid.length<5||uid.length>150||! /^[A-Za-z0-9:_-]+$/.test(uid)||
+      !['active','blocked'].includes(status))return reply({error:'Usuário ou status inválido.'},400);
+    const user=await env.DB.prepare('SELECT uid FROM users WHERE uid=?').bind(uid).first();
+    if(!user)return reply({error:'Usuário não encontrado.'},404);
+    await env.DB.batch([
+      env.DB.prepare('UPDATE users SET account_status=? WHERE uid=?').bind(status,uid),
+      env.DB.prepare('INSERT INTO admin_actions(actor_email,target_uid,action_type) VALUES(?,?,?)')
+        .bind(email,uid,status==='blocked'?'account_blocked':'account_unblocked'),
+    ]);
+    return reply({ok:true,status});
   }
   return reply({error:'Rota administrativa não encontrada.'},404);
 }

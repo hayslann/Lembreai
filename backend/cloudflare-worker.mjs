@@ -13,6 +13,10 @@ function json(body, status=200) {
     'X-Content-Type-Options':'nosniff',
   }});
 }
+async function isAccountActive(db,uid) {
+  const row=await db.prepare('SELECT account_status FROM users WHERE uid=?').bind(uid).first();
+  return row?.account_status==='active';
+}
 
 // Durable Object serializa a contagem por dia e por origem.
 // É um limitador global de teste, NÃO substitui autenticação por usuário.
@@ -159,17 +163,27 @@ export default {
       if(!user)return json({error:'Entre na sua conta para continuar.'},401);
       if(!env.DB)return json({error:'Conta online indisponível.'},503);
       await upsertFirebaseUser(env.DB,user);
+      if(!await isAccountActive(env.DB,user.uid))return json({error:'Esta conta está bloqueada.'},403);
       const account=await env.DB.prepare(`SELECT uid,email,plan,
         COALESCE((SELECT SUM(delta) FROM credit_ledger WHERE user_uid=?
           AND (expires_at IS NULL OR datetime(expires_at)>CURRENT_TIMESTAMP)),0) credit_balance,
         last_active_at FROM users WHERE uid=?`).bind(user.uid,user.uid).first();
       return json({account});
     }
+    if(url.pathname==='/account/ping'&&request.method==='POST') {
+      const user=await verifyFirebaseUser(request,env);
+      if(!user)return json({error:'Entre na sua conta para registrar atividade.'},401);
+      if(!env.DB)return json({error:'Conta online indisponível.'},503);
+      await upsertFirebaseUser(env.DB,user);
+      if(!await isAccountActive(env.DB,user.uid))return json({error:'Esta conta está bloqueada.'},403);
+      return json({ok:true,recordedAt:new Date().toISOString()});
+    }
     if(url.pathname==='/rewards/start'&&request.method==='POST') {
       const user=await verifyFirebaseUser(request,env);
       if(!user)return json({error:'Entre na sua conta para receber créditos.'},401);
       if(!env.DB)return json({error:'Créditos indisponíveis.'},503);
       await upsertFirebaseUser(env.DB,user);
+      if(!await isAccountActive(env.DB,user.uid))return json({error:'Esta conta está bloqueada.'},403);
       const today=await env.DB.prepare(`SELECT COUNT(*) count FROM reward_sessions
         WHERE user_uid=? AND created_at>=date('now')`).bind(user.uid).first();
       if(Number(today?.count||0)>=3)return json({error:'Limite diário de anúncios premiados atingido.'},429);
@@ -183,6 +197,8 @@ export default {
       const user=await verifyFirebaseUser(request,env);
       if(!user)return json({error:'Entre na sua conta para consultar os créditos.'},401);
       if(!env.DB)return json({error:'Créditos indisponíveis.'},503);
+      await upsertFirebaseUser(env.DB,user);
+      if(!await isAccountActive(env.DB,user.uid))return json({error:'Esta conta está bloqueada.'},403);
       const customData=url.searchParams.get('custom_data')||'';
       if(!/^[A-Za-z0-9_-]{32,100}$/.test(customData))return json({error:'Sessão inválida.'},400);
       const row=await env.DB.prepare(`SELECT status,expires_at FROM reward_sessions
@@ -196,6 +212,8 @@ export default {
       const user=await verifyFirebaseUser(request,env);
       if(!user)return json({error:'Entre na sua conta para usar créditos.'},401);
       if(!env.DB)return json({error:'Créditos indisponíveis.'},503);
+      await upsertFirebaseUser(env.DB,user);
+      if(!await isAccountActive(env.DB,user.uid))return json({error:'Esta conta está bloqueada.'},403);
       let data;try{data=await request.json();}catch(_){return json({error:'Pedido inválido.'},400);}
       const count=data?.count;
       if(!Number.isInteger(count)||count<1||count>10)return json({error:'Quantidade inválida.'},400);
@@ -255,7 +273,10 @@ export default {
     if(hasAuth) {
       account=await verifyFirebaseUser(request,env);
       if(!account)return json({error:'Sessão inválida. Entre novamente na sua conta.'},401);
-      if(env.DB) await upsertFirebaseUser(env.DB,account);
+      if(env.DB) {
+        await upsertFirebaseUser(env.DB,account);
+        if(!await isAccountActive(env.DB,account.uid))return json({error:'Esta conta está bloqueada.'},403);
+      }
     }
     if (Number(request.headers.get('Content-Length')||0)>4_500_000) {
       return json({error:'Mensagem extensa demais.'},413);

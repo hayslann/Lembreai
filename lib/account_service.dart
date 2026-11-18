@@ -159,6 +159,10 @@ class AccountService {
     return account is Map ? int.tryParse(account['credit_balance']?.toString()??'') : null;
   }
 
+  static Future<void> recordActivity() async {
+    await _backend('/account/ping',method:'POST');
+  }
+
   static Future<bool> consumeCredits(int count) async {
     if(count<1)return true;
     final data=await _backend('/account/credits/use',method:'POST',body:{'count':count});

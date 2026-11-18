@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:image_picker/image_picker.dart';
@@ -14,6 +15,7 @@ import 'alert_preferences.dart';
 import 'plan_catalog.dart';
 import 'legal_text.dart';
 import 'account_screen.dart';
+import 'account_service.dart';
 import 'test_ad_banner.dart';
 import 'rewarded_ad_demo.dart';
 import 'app_update_service.dart';
@@ -206,7 +208,7 @@ class MainScreen extends StatefulWidget {
   State<MainScreen> createState() => _MainScreenState();
 }
 
-class _MainScreenState extends State<MainScreen> {
+class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   final input = TextEditingController();
   final nameInput = TextEditingController();
   final chatScroll = ScrollController();
@@ -229,10 +231,32 @@ class _MainScreenState extends State<MainScreen> {
   bool sending = false;
   int selectedAdvanceMinutes = defaultAdvanceMinutes;
   int page = 0;
+  Timer? presenceTimer;
+  bool appIsVisible=true;
   @override
-  void initState() { super.initState(); load(); }
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    load();
+    recordOnlinePresence();
+    presenceTimer=Timer.periodic(const Duration(minutes:1),(_){
+      if(appIsVisible)recordOnlinePresence();
+    });
+  }
   @override
-  void dispose() { input.dispose(); nameInput.dispose(); chatScroll.dispose(); super.dispose(); }
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    appIsVisible=state==AppLifecycleState.resumed;
+    if(appIsVisible)recordOnlinePresence();
+  }
+  Future<void> recordOnlinePresence() async {
+    try {await AccountService.recordActivity();} catch (_) {}
+  }
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    presenceTimer?.cancel();
+    input.dispose();nameInput.dispose();chatScroll.dispose();super.dispose();
+  }
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString('reminders');

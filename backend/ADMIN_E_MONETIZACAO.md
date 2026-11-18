@@ -20,10 +20,14 @@
 ## Dados que a central mostra
 
 - Quantidade de chamadas de IA, êxitos, falhas, imagens e tokens por dia.
-- Contagem de clientes autenticados (até conectar o Firebase, esta contagem é zero).
-- Usuários autenticados, créditos e planos, apenas quando login estiver funcionando.
-- Compra: apenas registro verificado pelo provedor de pagamentos, não inferido pelo celular.
+- Usuários autenticados, status ativo/bloqueado, créditos, planos, última atividade, pedidos e custo estimado por conta.
+- Ativos nos últimos 5 minutos: presença aproximada de contas autenticadas que enviam o sinal de atividade; não representa usuários sem login nem atividade offline.
+- Downloads: contador público dos arquivos da versão beta na página de releases do GitHub. Para downloads da Play Store será necessária a conexão/consulta ao Play Console.
+- Adicionar e retirar créditos com registro do administrador, UID/e-mail da conta, valor e data; bloquear/desbloquear contas. O Worker impede que uma conta bloqueada use IA, saldo ou anúncios.
+- Histórico de contratações verificadas pelo servidor. **Ainda não existe checkout conectado a um provedor de pagamento**, então a tabela permanece vazia até escolher e configurar um provedor e seu webhook.
 - Custos: taxa do Gemini e a cobrança da Cloudflare devem ser obtidos dos próprios painéis. Não apresentar uma fatura fictícia: são apenas tokens consumidos.
+
+As ações de crédito e bloqueio requerem a migração `0003_admin_actions.sql`, além das migrações `0002_user_usage_daily.sql` e `0001_operations.sql`. O código registra atividade só para quem entra em uma conta; sem autenticação não dá para distinguir clientes individuais com precisão.
 
 ## Firebase Authentication
 
