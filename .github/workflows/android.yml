@@ -72,6 +72,8 @@ jobs:
         run: node --test backend/brain.test.mjs backend/cloudflare-worker.test.mjs backend/multimodal.test.mjs backend/commercial-readiness.test.mjs backend/admin.test.mjs backend/reward_policy.test.mjs
       - name: Teste real da conversa com Gemini na Cloudflare
         run: node backend/smoke-live.mjs
+      - name: Testar acesso protegido ao painel administrativo
+        run: node backend/admin-live-smoke.mjs
       - name: Compilar APK
         run: flutter build apk --debug --dart-define=AI_SERVER_URL="https://lembreai-ia.hayslan08.workers.dev"
       - name: Enviar APK
