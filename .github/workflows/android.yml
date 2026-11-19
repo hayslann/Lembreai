@@ -62,16 +62,22 @@ jobs:
               s = kts.read_text()
               # Android 9 (API 28) é a versão mínima; os SDKs de compilação
               # e destino seguem os padrões atuais do Flutter stable.
-              import re
-              s, count = re.subn(r'(?m)^(\s*minSdk\s*=\s*)flutter\.minSdkVersion\s*              if 'isCoreLibraryDesugaringEnabled' not in s:
+              if 'minSdk = flutter.minSdkVersion' in s:
+                  s = s.replace('minSdk = flutter.minSdkVersion', 'minSdk = 28', 1)
+              elif 'minSdk = 28' not in s:
+                  raise SystemExit('Não encontrei minSdk para configurar Android 9 (API 28).')
+              if 'isCoreLibraryDesugaringEnabled' not in s:
                   s = s.replace('compileOptions {', 'compileOptions {\n        isCoreLibraryDesugaringEnabled = true', 1)
               if 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:' not in s:
                   s += '\ndependencies { coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4") }\n'
               kts.write_text(s)
           elif groovy.exists():
               s = groovy.read_text()
-              import re
-              s, count = re.subn(r'(?m)^(\s*minSdkVersion\s+)flutter\.minSdkVersion\s*              if 'coreLibraryDesugaringEnabled' not in s:
+              if 'minSdkVersion flutter.minSdkVersion' in s:
+                  s = s.replace('minSdkVersion flutter.minSdkVersion', 'minSdkVersion 28', 1)
+              elif 'minSdkVersion 28' not in s:
+                  raise SystemExit('Não encontrei minSdkVersion para configurar Android 9 (API 28).')
+              if 'coreLibraryDesugaringEnabled' not in s:
                   s = s.replace('compileOptions {','compileOptions {\n        coreLibraryDesugaringEnabled true',1)
               if 'coreLibraryDesugaring ' not in s:
                   s += "\ndependencies { coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4' }\n"
