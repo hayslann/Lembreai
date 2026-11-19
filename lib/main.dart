@@ -22,22 +22,29 @@ import 'rewarded_ad_demo.dart';
 import 'app_update_service.dart';
 
 final alarms = FlutterLocalNotificationsPlugin();
+bool _alarmServicesInitialized = false;
+
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  try {
-    tzdata.initializeTimeZones();
-    tz.setLocalLocation(tz.getLocation((await FlutterTimezone.getLocalTimezone()).identifier));
-  } catch (_) {}
-  try {
-    await alarms.initialize(const InitializationSettings(
-      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-    ));
-  } catch (_) {
-    // Falha de inicialização do plugin de notificações não pode impedir
-    // a abertura do app; os lembretes continuam acessíveis.
-  }
+  // Exibe a interface antes de chamar plugins nativos de notificações/horário.
+  // Uma falha nesses plugins não deve impedir a abertura do LembreAI.
+  tzdata.initializeTimeZones();
   runApp(const LembreAI());
+}
+
+Future<void> _ensureAlarmServicesInitialized() async {
+  if (_alarmServicesInitialized) return;
+  try {
+    final deviceTimezone = await FlutterTimezone.getLocalTimezone();
+    tz.setLocalLocation(tz.getLocation(deviceTimezone.identifier));
+  } catch (_) {
+    tz.setLocalLocation(tz.getLocation('America/Sao_Paulo'));
+  }
+  await alarms.initialize(const InitializationSettings(
+    android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+  ));
+  _alarmServicesInitialized = true;
 }
 
 class Reminder {
@@ -74,6 +81,7 @@ class Reminder {
 /// Agenda avisos sonoros usando o canal específico da nova versão.
 /// O som depende de permissão, volume, modo silencioso e economia de bateria.
 Future<bool> scheduleReminder(Reminder r, {bool requestPermissions = false}) async {
+  await _ensureAlarmServicesInitialized();
   final android = alarms.resolvePlatformSpecificImplementation<
       AndroidFlutterLocalNotificationsPlugin>();
   if (requestPermissions) {
@@ -123,6 +131,7 @@ Future<bool> scheduleReminder(Reminder r, {bool requestPermissions = false}) asy
 }
 
 Future<void> cancelReminder(Reminder r) async {
+  await _ensureAlarmServicesInitialized();
   for (var i = 0; i < 3; i++) {
     await alarms.cancel(r.id * 3 + i);
   }
@@ -307,25 +316,11 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       loaded = true;
     });
     scrollToLatest();
-    // Abre primeiro a agenda e restaura alarmes em segundo plano para evitar
-    // que muitos lembretes façam a tela inicial parecer travada.
-    unawaited(_restoreReminderAlarms());
+    // Alarmes já registrados permanecem sob controle dos receivers Android.
+    // Não inicialize plugins nativos em segundo plano durante a abertura.
     checkUpdates(silent: true);
   }
 
-  Future<void> _restoreReminderAlarms() async {
-    for (final reminder in reminders) {
-      try {
-        if (reminder.done || !reminder.when.isAfter(DateTime.now())) {
-          await cancelReminder(reminder);
-        } else {
-          await scheduleReminder(reminder);
-        }
-      } catch (_) {
-        // Permissões/serviços de notificação não podem bloquear o aplicativo.
-      }
-    }
-  }
   Future<void> save() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('reminders', jsonEncode(reminders.map((e)=>e.toJson()).toList()));
@@ -444,6 +439,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                     (plan.available?' • disponível':' • em preparação')),
                 )),
               const RewardedAdDemo(),
+              if (consentTestAds) const TestAdBanner(),
               const SizedBox(height:8),
               const Text('Os avisos não são garantidos em situações de '
                 'bateria descarregada, falta de permissão ou restrições do Android.'),
@@ -1071,7 +1067,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             );
           },
         )),
-        if(consentTestAds) const TestAdBanner(),
         SafeArea(child: Padding(padding: const EdgeInsets.all(8),
           child: Column(mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start, children: [
