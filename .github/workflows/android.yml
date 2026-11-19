@@ -1,7 +1,7 @@
 name: Testar e gerar APK
 on:
   push:
-    branches: [main, principal]
+    branches: [main, principal, codex/finish-lembreai-beta]
   workflow_dispatch:
 
 concurrency:
