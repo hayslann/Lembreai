@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'brand_logo.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/data/latest.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
@@ -24,13 +25,18 @@ final alarms = FlutterLocalNotificationsPlugin();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  tzdata.initializeTimeZones();
   try {
+    tzdata.initializeTimeZones();
     tz.setLocalLocation(tz.getLocation((await FlutterTimezone.getLocalTimezone()).identifier));
   } catch (_) {}
-  await alarms.initialize(const InitializationSettings(
-    android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-  ));
+  try {
+    await alarms.initialize(const InitializationSettings(
+      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+    ));
+  } catch (_) {
+    // Falha de inicialização do plugin de notificações não pode impedir
+    // a abertura do app; os lembretes continuam acessíveis.
+  }
   runApp(const LembreAI());
 }
 
@@ -209,6 +215,7 @@ class MainScreen extends StatefulWidget {
 }
 
 class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
+  late final Future<PackageInfo> appPackageInfo = PackageInfo.fromPlatform();
   final input = TextEditingController();
   final nameInput = TextEditingController();
   final chatScroll = ScrollController();
@@ -258,7 +265,15 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     input.dispose();nameInput.dispose();chatScroll.dispose();super.dispose();
   }
   Future<void> load() async {
-    final prefs = await SharedPreferences.getInstance();
+    late final SharedPreferences prefs;
+    try {
+      prefs = await SharedPreferences.getInstance();
+    } catch (_) {
+      // Falha na leitura local não deve deixar a tela presa no carregamento.
+      if (!mounted) return;
+      setState(() => loaded = true);
+      return;
+    }
     final raw = prefs.getString('reminders');
     try {
       if (raw != null) {
@@ -266,18 +281,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             .map((e) => Reminder.fromJson(Map<String, dynamic>.from(e as Map))));
       }
     } catch (_) {}
-    // Migra os alertas antigos (1 dia/40 minutos) para a nova regra.
-    for (final r in reminders) {
-      try {
-        if (r.done || !r.when.isAfter(DateTime.now())) {
-          await cancelReminder(r);
-        } else {
-          await scheduleReminder(r);
-        }
-      } catch (_) {
-        // O aplicativo continua abrindo, mesmo que Android negue alarmes.
-      }
-    }
     // Conversas ficam apenas no aparelho; imagens nunca são persistidas no chat.
     try {
       final stored = prefs.getString('chat_history');
@@ -304,7 +307,24 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       loaded = true;
     });
     scrollToLatest();
+    // Abre primeiro a agenda e restaura alarmes em segundo plano para evitar
+    // que muitos lembretes façam a tela inicial parecer travada.
+    unawaited(_restoreReminderAlarms());
     checkUpdates(silent: true);
+  }
+
+  Future<void> _restoreReminderAlarms() async {
+    for (final reminder in reminders) {
+      try {
+        if (reminder.done || !reminder.when.isAfter(DateTime.now())) {
+          await cancelReminder(reminder);
+        } else {
+          await scheduleReminder(reminder);
+        }
+      } catch (_) {
+        // Permissões/serviços de notificação não podem bloquear o aplicativo.
+      }
+    }
   }
   Future<void> save() async {
     final prefs = await SharedPreferences.getInstance();
@@ -439,7 +459,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   /// Verifica novas versoes sem interromper o cliente.
   Future<void> checkUpdates({bool silent=false}) async {
-    if (updateBusy) return;
+    if (!mounted || updateBusy) return;
     setState(() => updateBusy=true);
     try {
       final latest=await AppUpdateService.check();
@@ -488,6 +508,14 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           setState(()=>downloadProgress=value);
         }
       });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          duration: Duration(seconds: 8),
+          content: Text('O instalador do Android foi aberto. Confirme em '
+            '“Instalar” para concluir. Se aparecer “App não instalado”, '
+            'não desinstale antes de salvar seus lembretes.'),
+        ));
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -514,6 +542,33 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           ListTile(leading:const Icon(Icons.privacy_tip_outlined),
             title:const Text('Como seus dados são tratados'),
             onTap:()=>showDocument('Privacidade',privacySummary)),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            value: consentTestAds,
+            title: const Text('Mostrar anúncios de teste'),
+            subtitle: const Text('Demonstrações do Google, sem pagamento. '
+              'Anúncios reais dependem da aprovação da conta AdMob.'),
+            onChanged: (value) async {
+              final enabled = value == true;
+              setState(() => consentTestAds = enabled);
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setBool('show_test_ads', enabled);
+            },
+            controlAffinity: ListTileControlAffinity.leading,
+          ),
+          FutureBuilder<PackageInfo>(
+            future: appPackageInfo,
+            builder: (context, snapshot) {
+              final info = snapshot.data;
+              return ListTile(
+                leading: const Icon(Icons.info_outline),
+                title: const Text('Versão do aplicativo'),
+                subtitle: Text(info == null
+                  ? 'Consultando…'
+                  : '${info.version} (${info.buildNumber})'),
+              );
+            },
+          ),
           ListTile(leading:const Icon(Icons.delete_outline),
             title:const Text('Apagar histórico de conversa'),
             subtitle:const Text('Apaga apenas mensagens deste aparelho.'),
@@ -943,7 +998,23 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       ))));
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('LembreAI'),
+      appBar: AppBar(title: FutureBuilder<PackageInfo>(
+        future: appPackageInfo,
+        builder: (context, snapshot) {
+          final info = snapshot.data;
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('LembreAI'),
+              Text(info == null
+                ? 'beta'
+                : 'v${info.version} • build ${info.buildNumber}',
+                style: Theme.of(context).textTheme.labelSmall),
+            ],
+          );
+        },
+      ),
         actions: [
           IconButton(onPressed: () => Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => const AccountScreen())),
