@@ -184,6 +184,7 @@ jobs:
           FIREBASE_WEB_API_KEY: ${{ secrets.FIREBASE_WEB_API_KEY }}
           GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID }}
           ADMOB_REWARDED_AD_UNIT_ID: ${{ secrets.ADMOB_REWARDED_AD_UNIT_ID }}
+          ADMOB_ADS_APPROVED: ${{ secrets.ADMOB_ADS_APPROVED }}
           ANDROID_KEYSTORE_PATH: ${{ env.ANDROID_KEYSTORE_PATH }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -191,19 +192,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Mantém anúncios de teste até a aprovação do app/conta AdMob.
+          # Só use IDs reais depois de criar o secret ADMOB_ADS_APPROVED=true.
+          rewarded_ad_unit_id="ca-app-pub-3940256099942544/5224354917"
+          if [[ "$ADMOB_ADS_APPROVED" == "true" && -n "$ADMOB_REWARDED_AD_UNIT_ID" ]]; then
+            rewarded_ad_unit_id="$ADMOB_REWARDED_AD_UNIT_ID"
+          fi
           if [[ "${{ steps.android_signing.outputs.stable }}" == "true" ]]; then
             flutter build apk --release \
               --dart-define=AI_SERVER_URL="https://lembreai-ia.hayslan08.workers.dev" \
               --dart-define=FIREBASE_WEB_API_KEY="$FIREBASE_WEB_API_KEY" \
               --dart-define=GOOGLE_WEB_CLIENT_ID="$GOOGLE_WEB_CLIENT_ID" \
-              --dart-define=ADMOB_REWARDED_AD_UNIT_ID="$ADMOB_REWARDED_AD_UNIT_ID"
+              --dart-define=ADMOB_REWARDED_AD_UNIT_ID="$rewarded_ad_unit_id"
             echo "apk_path=build/app/outputs/flutter-apk/app-release.apk" >> "$GITHUB_OUTPUT"
           else
             flutter build apk --debug \
               --dart-define=AI_SERVER_URL="https://lembreai-ia.hayslan08.workers.dev" \
               --dart-define=FIREBASE_WEB_API_KEY="$FIREBASE_WEB_API_KEY" \
               --dart-define=GOOGLE_WEB_CLIENT_ID="$GOOGLE_WEB_CLIENT_ID" \
-              --dart-define=ADMOB_REWARDED_AD_UNIT_ID="$ADMOB_REWARDED_AD_UNIT_ID"
+              --dart-define=ADMOB_REWARDED_AD_UNIT_ID="$rewarded_ad_unit_id"
             echo "apk_path=build/app/outputs/flutter-apk/app-debug.apk" >> "$GITHUB_OUTPUT"
           fi
       - name: Enviar APK
