@@ -113,8 +113,10 @@ jobs:
       - name: Testar entendimento e segurança da IA
         run: node --test backend/brain.test.mjs backend/cloudflare-worker.test.mjs backend/multimodal.test.mjs backend/commercial-readiness.test.mjs backend/admin.test.mjs backend/reward_policy.test.mjs
       - name: Teste real da conversa com Gemini na Cloudflare
+        if: ${{ github.ref_name == 'main' || github.ref_name == 'principal' }}
         run: node backend/smoke-live.mjs
       - name: Testar acesso protegido ao painel administrativo
+        if: ${{ github.ref_name == 'main' || github.ref_name == 'principal' }}
         run: node backend/admin-live-smoke.mjs
       - name: Preparar assinatura persistente do Android
         id: android_signing
