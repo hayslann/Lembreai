@@ -220,7 +220,7 @@ jobs:
           arch: x86_64
           profile: pixel_6
           script: |
-            set -euo pipefail
+            set -eu
             adb install -r "${{ steps.build_apk.outputs.apk_path }}"
             adb logcat -c
             adb shell monkey -p app.lembreai.lembreai 1
