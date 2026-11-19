@@ -12,9 +12,9 @@ class _RewardedAdDemoState extends State<RewardedAdDemo>{
   static const testUnitId='ca-app-pub-3940256099942544/5224354917';
   static const configuredAdUnitId=String.fromEnvironment(
     'ADMOB_REWARDED_AD_UNIT_ID', defaultValue:'');
-  static const adUnitId=configuredAdUnitId.isEmpty
+  static final adUnitId=configuredAdUnitId.isEmpty
     ? testUnitId : configuredAdUnitId;
-  static const testOnly=adUnitId==testUnitId;
+  static final testOnly=adUnitId==testUnitId;
   RewardedAd? ad;
   bool loading=false;
   bool earned=false;
