@@ -1,7 +1,7 @@
 name: Testar e gerar APK
 on:
   push:
-    branches: [main, principal]
+    branches: [main, principal, codex/finish-lembreai-beta]
   workflow_dispatch:
 
 concurrency:
@@ -226,7 +226,7 @@ jobs:
           retention-days: 14
 
       - name: Publicar APK de testes com link direto
-        if: ${{ steps.android_signing.outputs.stable == 'true' }}
+        if: ${{ steps.android_signing.outputs.stable == 'true' && (github.ref_name == 'main' || github.ref_name == 'principal') }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
