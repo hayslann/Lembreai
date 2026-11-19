@@ -1,7 +1,7 @@
 name: Testar e gerar APK
 on:
   push:
-    branches: [main, principal, codex/finish-lembreai-beta]
+    branches: [main, principal]
   workflow_dispatch:
 
 concurrency:
@@ -213,24 +213,6 @@ jobs:
               --dart-define=ADMOB_REWARDED_AD_UNIT_ID="$rewarded_ad_unit_id"
             echo "apk_path=build/app/outputs/flutter-apk/app-debug.apk" >> "$GITHUB_OUTPUT"
           fi
-      - name: Instalar e abrir APK em emulador Android
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 30
-          arch: x86_64
-          profile: pixel_2
-          script: |
-            set -eu
-            adb install -r "${{ steps.build_apk.outputs.apk_path }}"
-            adb logcat -c
-            adb shell monkey -p app.lembreai.lembreai 1
-            sleep 15
-            if ! adb shell pidof app.lembreai.lembreai >/dev/null; then
-              echo 'LembreAI fechou no emulador. Últimos logs Android:'
-              adb logcat -d -t 1200
-              exit 1
-            fi
-            echo 'LembreAI permaneceu aberto no emulador Android.'
       - name: Enviar APK
         uses: actions/upload-artifact@v4
         with:
