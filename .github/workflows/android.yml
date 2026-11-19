@@ -216,9 +216,9 @@ jobs:
       - name: Instalar e abrir APK em emulador Android
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: 30
           arch: x86_64
-          profile: pixel_6
+          profile: pixel_2
           script: |
             set -eu
             adb install -r "${{ steps.build_apk.outputs.apk_path }}"
