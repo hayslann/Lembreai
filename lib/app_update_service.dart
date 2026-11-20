@@ -127,7 +127,8 @@ class AppUpdateService {
         type:'application/vnd.android.package-archive');
       if(result.type!=ResultType.done) {
         throw StateError('O Android não abriu o instalador. '
-          'Confira a permissão para instalar aplicativos dessa origem.');
+          'Detalhe: ${result.message}. Confira a permissão para instalar '
+          'aplicativos dessa origem.');
       }
     } finally {
       client.close();

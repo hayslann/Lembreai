@@ -1,78 +1,126 @@
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'account_service.dart';
 
-/// Demonstra o fluxo com anúncios de teste oficiais.
-//// Sem usuário autenticado + assinatura AdMob SSV validada no servidor,
-/// assistir ao anúncio NÃO gera crédito resgatável.
 class RewardedAdDemo extends StatefulWidget {
   const RewardedAdDemo({super.key});
   @override
   State<RewardedAdDemo> createState()=>_RewardedAdDemoState();
 }
+
 class _RewardedAdDemoState extends State<RewardedAdDemo>{
+  static const testUnitId='ca-app-pub-3940256099942544/5224354917';
+  static const configuredAdUnitId=String.fromEnvironment(
+    'ADMOB_REWARDED_AD_UNIT_ID', defaultValue:'');
+  static final adUnitId=configuredAdUnitId.isEmpty
+    ? testUnitId : configuredAdUnitId;
+  static final testOnly=adUnitId==testUnitId;
   RewardedAd? ad;
   bool loading=false;
   bool earned=false;
   @override void dispose(){ad?.dispose();super.dispose();}
+
+  void message(String text){
+    if(mounted)ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content:Text(text)));
+  }
+
   Future<void> watch()async{
     if(loading)return;
-    setState((){loading=true;earned=false;});
+    setState(()=>loading=true);
+    earned=false;
+    Map<String,dynamic>? session;
+    if(!testOnly){
+      session=await AccountService.startRewardSession();
+      if(session==null){
+        if(mounted)setState(()=>loading=false);
+        message('Entre na sua conta para assistir e receber o benefício.');
+        return;
+      }
+    }
     try {
       await MobileAds.instance.initialize();
       RewardedAd.load(
-        adUnitId:'ca-app-pub-3940256099942544/5224354917',
+        adUnitId:adUnitId,
         request:const AdRequest(nonPersonalizedAds:true),
         rewardedAdLoadCallback:RewardedAdLoadCallback(
-          onAdLoaded:(loaded){
+          onAdLoaded:(loaded)async{
             if(!mounted){loaded.dispose();return;}
+            if(session!=null){
+              await loaded.setServerSideOptions(ServerSideVerificationOptions(
+                userId:session!['userId'] as String,
+                customData:session['customData'] as String,
+              ));
+            }
             ad=loaded;
             loaded.fullScreenContentCallback=FullScreenContentCallback<RewardedAd>(
-              onAdDismissedFullScreenContent:(a){
-                a.dispose();ad=null;
-                if(!mounted)return;
-                setState(()=>loading=false);
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content:Text(earned
-                    ? 'Vídeo de TESTE concluído! Nenhum crédito real foi liberado. '
-                      'Créditos dependem de conta e validação no servidor.'
-                    : 'Publicidade de teste encerrada sem recompensa.')));
+              onAdDismissedFullScreenContent:(value)async{
+                value.dispose();ad=null;
+                if(mounted)setState(()=>loading=false);
+                if(!earned){
+                  message('Anúncio encerrado sem recompensa.');
+                  return;
+                }
+                if(session==null){
+                  message('Anúncio de teste concluído. Nenhum crédito real foi liberado.');
+                  return;
+                }
+                message(await _waitForVerifiedReward(
+                  session!['customData'] as String,
+                ));
               },
-              onAdFailedToShowFullScreenContent:(a,error){
-                a.dispose();ad=null;if(mounted)setState(()=>loading=false);
+              onAdFailedToShowFullScreenContent:(value,error){
+                value.dispose();ad=null;
+                if(mounted)setState(()=>loading=false);
+                message('Não foi possível exibir o anúncio. Tente novamente.');
               },
             );
-            loaded.show(onUserEarnedReward:(a,reward){
-              // NÃO creditar no aparelho; apenas mostrar o teste.
+            loaded.show(onUserEarnedReward:(value,reward){
+              // O callback do aparelho é apenas visual. Créditos vêm do SSV.
               earned=true;
             });
           },
           onAdFailedToLoad:(error){
-            if(!mounted)return;
-            setState(()=>loading=false);
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content:Text('Anúncio de teste indisponível. '
-                'Tente novamente mais tarde.')));
+            if(mounted)setState(()=>loading=false);
+            message('Anúncio indisponível agora. Tente novamente mais tarde.');
           },
         ),
       );
     } catch(_){
       if(mounted)setState(()=>loading=false);
+      message('Não foi possível carregar o anúncio.');
     }
   }
+
+  Future<String> _waitForVerifiedReward(String customData)async{
+    for(var attempt=0;attempt<6;attempt++){
+      if(attempt>0)await Future<void>.delayed(const Duration(seconds:2));
+      final status=await AccountService.rewardStatus(customData);
+      if(status?['status']=='credited'){
+        final credits=status?['availableCredits']??0;
+        return 'Benefício confirmado pelo Google! Você tem $credits crédito(s) para lembretes extras.';
+      }
+    }
+    return 'Assistiu ao anúncio. A confirmação do Google ainda está pendente; '
+      'os créditos aparecem assim que o servidor validar o retorno.';
+  }
+
   @override Widget build(BuildContext context)=>Card(
     child:Padding(padding:const EdgeInsets.all(12),child:Column(
       crossAxisAlignment:CrossAxisAlignment.start,
       children:[
-        const Text('🎁 Benefícios por assistir propaganda',
+        const Text('🎁 Ganhe um lembrete extra',
           style:TextStyle(fontWeight:FontWeight.bold)),
         const SizedBox(height:6),
-        const Text('Proposta: 1 anúncio verificado = 1 lembrete extra por 24 horas, '
-          'com limite de 3 por dia. Beta: somente anúncio de teste, '
-          'sem créditos reais.'),
+        Text(testOnly
+          ? 'Beta: anúncio oficial de teste. Ele não gera créditos reais.'
+          : 'Um anúncio validado pelo Google libera 1 crédito para criar um lembrete '
+            'extra. O crédito expira após 24 horas; limite de 3 por dia.'),
         const SizedBox(height:8),
         FilledButton.tonal(
           onPressed:loading?null:watch,
-          child:Text(loading?'Carregando anúncio...':'Assistir anúncio de teste'),
+          child:Text(loading?'Carregando anúncio...':
+            testOnly?'Assistir anúncio de teste':'Assistir e ganhar crédito'),
         ),
       ],
     )),
