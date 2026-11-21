@@ -29,7 +29,11 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Exibe a interface antes de chamar plugins nativos de notificações/horário.
   // Uma falha nesses plugins não deve impedir a abertura do LembreAI.
-  tzdata.initializeTimeZones();
+  try {
+    tzdata.initializeTimeZones();
+  } catch (_) {
+    // Falha no banco de fusos nao pode impedir a abertura do app.
+  }
   runApp(const LembreAI());
 }
 
