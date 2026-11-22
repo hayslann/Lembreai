@@ -95,7 +95,10 @@ jobs:
           if 'androidx.work.impl.WorkDatabase_Impl' not in existing:
               proguard.write_text(existing + keep_rules)
           if 'androidx.work:work-runtime:' not in s:
-              s += '\ndependencies { implementation("androidx.work:work-runtime:2.11.2") }\n'
+              if kts.exists():
+                  s += '\ndependencies { implementation("androidx.work:work-runtime:2.11.2") }\n'
+              else:
+                  s += "\ndependencies { implementation 'androidx.work:work-runtime:2.11.2' }\n"
           if 'proguard-rules.pro' not in s:
               if kts.exists():
                   s, count = re.subn(
