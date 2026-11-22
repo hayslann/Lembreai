@@ -83,6 +83,33 @@ jobs:
               if 'coreLibraryDesugaring ' not in s:
                   s += "\ndependencies { coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4' }\n"
               groovy.write_text(s)
+          # O Google Mobile Ads inclui WorkManager 2.7.0. O R8 pode otimizar
+          # classes Room usadas por reflexão e derrubar o app antes do Flutter.
+          # Mantém as classes geradas e substitui a dependência antiga.
+          proguard = Path('android/app/proguard-rules.pro')
+          existing = proguard.read_text() if proguard.exists() else ''
+          keep_rules = '''
+          -keep class androidx.work.impl.WorkDatabase { *; }
+          -keep class androidx.work.impl.WorkDatabase_Impl { *; }
+          '''
+          if 'androidx.work.impl.WorkDatabase_Impl' not in existing:
+              proguard.write_text(existing + keep_rules)
+          if 'androidx.work:work-runtime:' not in s:
+              s += '\ndependencies { implementation("androidx.work:work-runtime:2.11.2") }\n'
+          if 'proguard-rules.pro' not in s:
+              if kts.exists():
+                  s, count = re.subn(
+                      r'(?m)^(\s*release\s*\{)',
+                      r'\1\n            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")',
+                      s, count=1)
+              else:
+                  s, count = re.subn(
+                      r'(?m)^(\s*release\s*\{)',
+                      r"\1\n            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'",
+                      s, count=1)
+              if count != 1:
+                  raise SystemExit('Não encontrei buildTypes.release para adicionar regras R8 do WorkManager.')
+          (kts if kts.exists() else groovy).write_text(s)
           PY
       - name: Dependências
         run: flutter pub get
