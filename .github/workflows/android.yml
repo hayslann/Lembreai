@@ -56,6 +56,13 @@ jobs:
           brand_icon = Path('assets/branding/lembreai_logo.png').read_bytes()
           for launcher in Path('android/app/src/main/res').glob('mipmap-*/ic_launcher.png'):
               launcher.write_bytes(brand_icon)
+          res = Path('android/app/src/main/res')
+          (res/'drawable').mkdir(exist_ok=True)
+          (res/'drawable/ic_stat_reminder.xml').write_text('''<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+            <path android:fillColor="#FFFFFFFF" android:pathData="M12,22c1.1,0 2,-0.9 2,-2h-4c0,1.1 0.9,2 2,2zM18,16v-5c0,-3.1 -1.6,-5.6 -4.5,-6.3V4a1.5,1.5 0,0 0,-3 0v0.7C7.6,5.4 6,7.9 6,11v5l-2,2v1h16v-1z"/>
+          </vector>''')
+          (res/'raw').mkdir(exist_ok=True)
+          (res/'raw/lembreai_keep.xml').write_text('<resources xmlns:tools="http://schemas.android.com/tools" tools:keep="@drawable/ic_stat_reminder" />')
           kts = Path('android/app/build.gradle.kts')
           groovy = Path('android/app/build.gradle')
           if kts.exists():
@@ -89,10 +96,18 @@ jobs:
           proguard = Path('android/app/proguard-rules.pro')
           existing = proguard.read_text() if proguard.exists() else ''
           keep_rules = '''
+          -keepattributes Signature,*Annotation*,InnerClasses,EnclosingMethod
+          -keep class com.google.gson.reflect.TypeToken { *; }
+          -keep class * extends com.google.gson.reflect.TypeToken { *; }
+          -keep class com.dexterous.flutterlocalnotifications.models.** { *; }
+          -keep class * extends com.google.gson.TypeAdapter
+          -keep class * implements com.google.gson.TypeAdapterFactory
+          -keep class * implements com.google.gson.JsonSerializer
+          -keep class * implements com.google.gson.JsonDeserializer
           -keep class androidx.work.impl.WorkDatabase { *; }
           -keep class androidx.work.impl.WorkDatabase_Impl { *; }
           '''
-          if 'androidx.work.impl.WorkDatabase_Impl' not in existing:
+          if keep_rules.strip() not in existing:
               proguard.write_text(existing + keep_rules)
           if 'androidx.work:work-runtime:' not in s:
               if kts.exists():

@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:image_picker/image_picker.dart';
 import 'brand_logo.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -46,7 +47,7 @@ Future<void> _ensureAlarmServicesInitialized() async {
     tz.setLocalLocation(tz.getLocation('America/Sao_Paulo'));
   }
   await alarms.initialize(const InitializationSettings(
-    android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+    android: AndroidInitializationSettings('ic_stat_reminder'),
   ));
   _alarmServicesInitialized = true;
 }
@@ -80,6 +81,15 @@ class Reminder {
         done: v['done'] == true,
         location: v['location'] is String ? v['location'] as String : '',
         advanceMinutes: normalizedAdvanceMinutes(v['advanceMinutes']));
+}
+
+String alarmFailure(Object error) {
+  if (error is StateError) return error.message;
+  if (error is PlatformException) {
+    final detail = (error.message ?? '').split('\n').first;
+    return detail.isEmpty ? error.code : '${error.code} — $detail';
+  }
+  return 'Falha interna (${error.runtimeType}).';
 }
 
 /// Agenda avisos sonoros usando o canal específico da nova versão.
@@ -526,6 +536,26 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> checkAlarmPermissions() async {
+    String status;
+    try {
+      final android = alarms.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+      if (android == null) throw StateError('Serviço de alarmes indisponível.');
+      final notifications = await android.areNotificationsEnabled() == true ||
+          await android.requestNotificationsPermission() == true;
+      final exact = await android.canScheduleExactNotifications() == true ||
+          await android.requestExactAlarmsPermission() == true;
+      status = 'Notificações: ${notifications ? "permitidas" : "desativadas"}. '
+          'Alarmes exatos: ${exact ? "permitidos" : "desativados"}.';
+    } catch (error) {
+      status = alarmFailure(error);
+    }
+    if (mounted) await showDialog<void>(context: context, builder: (ctx) =>
+      AlertDialog(title: const Text('Permissões dos lembretes'), content: Text(status),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Fechar'))]));
+  }
+
   Future<void> showPreferences() async {
     if (!mounted) return;
     await showModalBottomSheet<void>(
@@ -537,6 +567,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         child: Column(mainAxisSize:MainAxisSize.min,children:[
           const Text('Privacidade e dados',style:TextStyle(
             fontSize:20,fontWeight:FontWeight.bold)),
+          ListTile(leading:const Icon(Icons.alarm),
+            title:const Text('Notificações e alarmes'),
+            onTap:() { Navigator.pop(sheetContext); checkAlarmPermissions(); }),
           ListTile(leading:const Icon(Icons.description_outlined),
             title:const Text('Termos de uso'),
             onTap:()=>showDocument('Termos de uso',appTerms)),
@@ -821,10 +854,14 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         return;
       }
       final failures=<String>[];
+      var approximate = false;
       for (final r in added) {
         try {
-          await scheduleReminder(r,requestPermissions:true);
-        } catch (_) {failures.add(r.title);}
+          final exact = await scheduleReminder(r,requestPermissions:true);
+          if (!exact) approximate = true;
+        } catch (error) {
+          failures.add('${r.title} — ${alarmFailure(error)}');
+        }
       }
       final report=added.map((r)=>'• '+r.title+'\n  '+formatted(r.when)+
         (r.location.isEmpty ? '' : '\n  Local: '+r.location)+
@@ -834,7 +871,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         (failures.isNotEmpty
           ? '\n\n⚠️ Falha ao programar os alarmes de: '+failures.join(', ')+
             '.'
-          : '\n\nAviso programado.'));
+          : approximate ? '\n\nAviso programado com horário aproximado pelo Android.' : '\n\nAviso programado.'));
     } catch (_) {
       bot('Não consegui concluir a solicitação. Confira a Agenda antes de tentar novamente.');
     } finally {
