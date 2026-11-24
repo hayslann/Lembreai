@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'account_service.dart';
+import 'plan_catalog.dart';
 import 'legal_text.dart';
 
 class AccountScreen extends StatefulWidget {
@@ -50,7 +51,7 @@ class _AccountScreenState extends State<AccountScreen> {
         if(signedIn!=null) ...[
           Text('Conectado como $signedIn',textAlign:TextAlign.center),
           const SizedBox(height:8),
-          Text(creditBalance==null
+          Text(personalBetaUnlimited ? 'Beta gratuita: lembretes ilimitados.' : creditBalance==null
             ? 'Créditos extras: não foi possível consultar agora.'
             : 'Créditos para lembretes extras: $creditBalance',
             textAlign:TextAlign.center),

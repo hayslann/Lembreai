@@ -441,10 +441,15 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
               const Text('Planos LembreAI',style:TextStyle(
                 fontSize:22,fontWeight:FontWeight.bold)),
               const SizedBox(height:8),
-              const Text('Você usa o plano gratuito. Os valores abaixo são '
-                'propostas; assinaturas e cobranças ainda não estão ativas.'),
+              if (personalBetaUnlimited)
+                const ListTile(leading: Icon(Icons.check_circle_outline),
+                  title: Text('Beta gratuita — lembretes ilimitados'),
+                  subtitle: Text('Sem mensalidade, créditos ou anúncios obrigatórios.'))
+              else
+                const Text('Você usa o plano gratuito. Os valores abaixo são '
+                  'propostas; assinaturas e cobranças ainda não estão ativas.'),
               const SizedBox(height:12),
-              for (final plan in plans)
+              if (!personalBetaUnlimited) for (final plan in plans)
                 Card(child: ListTile(
                   leading: Icon(plan.available
                     ? Icons.check_circle_outline : Icons.lock_outline),
@@ -453,8 +458,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                     ' lembretes ativos'+
                     (plan.available?' • disponível':' • em preparação')),
                 )),
-              const RewardedAdDemo(),
-              if (consentTestAds) const TestAdBanner(),
+              if (!personalBetaUnlimited) const RewardedAdDemo(),
+              if (!personalBetaUnlimited && consentTestAds) const TestAdBanner(),
               const SizedBox(height:8),
               const Text('Os avisos não são garantidos em situações de '
                 'bateria descarregada, falta de permissão ou restrições do Android.'),
@@ -824,9 +829,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         bot('Esses compromissos já estão cadastrados ou não têm data futura válida.');
         return;
       }
-      final slots=freeActiveReminderLimit-reminders.where((r)=>!r.done).length;
-      final freeSlots=slots>0 ? slots : 0;
-      final creditsNeeded=unique.length>freeSlots ? unique.length-freeSlots : 0;
+      final creditsNeeded=reminderCreditsNeeded(
+        reminders.where((r)=>!r.done).length, unique.length);
       if (photo!=null || unique.length>1) {
         final details=unique.map((r)=>'• '+r.title+'\n  '+formatted(r.when)+
           (r.location.isEmpty ? '' : '\n  Local: '+r.location)).join('\n\n');
@@ -1066,7 +1070,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
               : Icons.notification_important_outlined),
           ),
           IconButton(onPressed: showPlans,
-            tooltip: 'Planos e limites',
+            tooltip: personalBetaUnlimited ? 'Beta gratuita' : 'Planos e limites',
             icon: const Icon(Icons.workspace_premium_outlined)),
           IconButton(onPressed: showPreferences,
             tooltip: 'Privacidade e preferências',
