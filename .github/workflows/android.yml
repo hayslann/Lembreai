@@ -265,13 +265,22 @@ jobs:
           retention-days: 14
 
       - name: Publicar APK de testes com link direto
-        if: ${{ steps.android_signing.outputs.stable == 'true' && (github.ref_name == 'main' || github.ref_name == 'principal') }}
+        if: ${{ steps.android_signing.outputs.stable == 'true' && (github.ref_name == 'main' || github.ref_name == 'principal' || github.ref_name == 'codex/finish-lembreai-beta') }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
+          VERSION_LINE="$(grep '^version:' pubspec.yaml | awk '{print $2}')"
+          VERSION_NAME="${VERSION_LINE%%+*}"
+          VERSION_CODE="${VERSION_LINE##*+}"
           cp "${{ steps.build_apk.outputs.apk_path }}" LembreAI.apk
           if gh release view teste-android >/dev/null 2>&1; then
+            notes="$(gh release view teste-android --json body --jq .body)"
+            previous="$(sed -n 's/.*LEMBREAI_VERSION_CODE=\([0-9]\+\).*/\1/p' <<< "$notes")"
+            if [[ -n "$previous" && "$previous" -ge "$VERSION_CODE" ]]; then
+              echo "O canal já tem esta versão ou uma mais recente."
+              exit 0
+            fi
             gh release upload teste-android LembreAI.apk --clobber
           else
             gh release create teste-android LembreAI.apk \
@@ -279,7 +288,4 @@ jobs:
               --notes "Versão básica de testes. Não é a versão publicada na Play Store." \
               --prerelease --target "${GITHUB_SHA}"
           fi
-          VERSION_LINE="$(grep '^version:' pubspec.yaml | awk '{print $2}')"
-          VERSION_NAME="${VERSION_LINE%%+*}"
-          VERSION_CODE="${VERSION_LINE##*+}"
           gh release edit teste-android --notes "LembreAI beta. LEMBREAI_VERSION_NAME=${VERSION_NAME} LEMBREAI_VERSION_CODE=${VERSION_CODE}. O Android requer a mesma assinatura para atualizar sem apagar dados."
