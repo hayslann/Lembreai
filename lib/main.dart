@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:image_picker/image_picker.dart';
 import 'brand_logo.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/data/latest.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
@@ -14,22 +17,39 @@ import 'alert_preferences.dart';
 import 'plan_catalog.dart';
 import 'legal_text.dart';
 import 'account_screen.dart';
+import 'account_service.dart';
 import 'test_ad_banner.dart';
 import 'rewarded_ad_demo.dart';
 import 'app_update_service.dart';
 
 final alarms = FlutterLocalNotificationsPlugin();
+bool _alarmServicesInitialized = false;
+
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  tzdata.initializeTimeZones();
+  // Exibe a interface antes de chamar plugins nativos de notificações/horário.
+  // Uma falha nesses plugins não deve impedir a abertura do LembreAI.
   try {
-    tz.setLocalLocation(tz.getLocation((await FlutterTimezone.getLocalTimezone()).identifier));
-  } catch (_) {}
-  await alarms.initialize(const InitializationSettings(
-    android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-  ));
+    tzdata.initializeTimeZones();
+  } catch (_) {
+    // Falha no banco de fusos nao pode impedir a abertura do app.
+  }
   runApp(const LembreAI());
+}
+
+Future<void> _ensureAlarmServicesInitialized() async {
+  if (_alarmServicesInitialized) return;
+  try {
+    final deviceTimezone = await FlutterTimezone.getLocalTimezone();
+    tz.setLocalLocation(tz.getLocation(deviceTimezone.identifier));
+  } catch (_) {
+    tz.setLocalLocation(tz.getLocation('America/Sao_Paulo'));
+  }
+  await alarms.initialize(const InitializationSettings(
+    android: AndroidInitializationSettings('ic_stat_reminder'),
+  ));
+  _alarmServicesInitialized = true;
 }
 
 class Reminder {
@@ -63,9 +83,19 @@ class Reminder {
         advanceMinutes: normalizedAdvanceMinutes(v['advanceMinutes']));
 }
 
+String alarmFailure(Object error) {
+  if (error is StateError) return error.message;
+  if (error is PlatformException) {
+    final detail = (error.message ?? '').split('\n').first;
+    return detail.isEmpty ? error.code : '${error.code} — $detail';
+  }
+  return 'Falha interna (${error.runtimeType}).';
+}
+
 /// Agenda avisos sonoros usando o canal específico da nova versão.
 /// O som depende de permissão, volume, modo silencioso e economia de bateria.
 Future<bool> scheduleReminder(Reminder r, {bool requestPermissions = false}) async {
+  await _ensureAlarmServicesInitialized();
   final android = alarms.resolvePlatformSpecificImplementation<
       AndroidFlutterLocalNotificationsPlugin>();
   if (requestPermissions) {
@@ -97,6 +127,7 @@ Future<bool> scheduleReminder(Reminder r, {bool requestPermissions = false}) asy
   await cancelReminder(r);
   final moments = calculateAlertMoments(
       r.when, r.advanceMinutes, DateTime.now());
+  if (moments.isEmpty) throw StateError('O horário passou antes de programar o aviso.');
   for (final moment in moments) {
     await alarms.zonedSchedule(
       r.id * 3 + moment.slot, '🔔 ' + r.title,
@@ -115,6 +146,7 @@ Future<bool> scheduleReminder(Reminder r, {bool requestPermissions = false}) asy
 }
 
 Future<void> cancelReminder(Reminder r) async {
+  await _ensureAlarmServicesInitialized();
   for (var i = 0; i < 3; i++) {
     await alarms.cancel(r.id * 3 + i);
   }
@@ -206,7 +238,8 @@ class MainScreen extends StatefulWidget {
   State<MainScreen> createState() => _MainScreenState();
 }
 
-class _MainScreenState extends State<MainScreen> {
+class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
+  late final Future<PackageInfo> appPackageInfo = PackageInfo.fromPlatform();
   final input = TextEditingController();
   final nameInput = TextEditingController();
   final chatScroll = ScrollController();
@@ -229,12 +262,42 @@ class _MainScreenState extends State<MainScreen> {
   bool sending = false;
   int selectedAdvanceMinutes = defaultAdvanceMinutes;
   int page = 0;
+  Timer? presenceTimer;
+  bool appIsVisible=true;
   @override
-  void initState() { super.initState(); load(); }
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    load();
+    recordOnlinePresence();
+    presenceTimer=Timer.periodic(const Duration(minutes:1),(_){
+      if(appIsVisible)recordOnlinePresence();
+    });
+  }
   @override
-  void dispose() { input.dispose(); nameInput.dispose(); chatScroll.dispose(); super.dispose(); }
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    appIsVisible=state==AppLifecycleState.resumed;
+    if(appIsVisible)recordOnlinePresence();
+  }
+  Future<void> recordOnlinePresence() async {
+    try {await AccountService.recordActivity();} catch (_) {}
+  }
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    presenceTimer?.cancel();
+    input.dispose();nameInput.dispose();chatScroll.dispose();super.dispose();
+  }
   Future<void> load() async {
-    final prefs = await SharedPreferences.getInstance();
+    late final SharedPreferences prefs;
+    try {
+      prefs = await SharedPreferences.getInstance();
+    } catch (_) {
+      // Falha na leitura local não deve deixar a tela presa no carregamento.
+      if (!mounted) return;
+      setState(() => loaded = true);
+      return;
+    }
     final raw = prefs.getString('reminders');
     try {
       if (raw != null) {
@@ -242,18 +305,6 @@ class _MainScreenState extends State<MainScreen> {
             .map((e) => Reminder.fromJson(Map<String, dynamic>.from(e as Map))));
       }
     } catch (_) {}
-    // Migra os alertas antigos (1 dia/40 minutos) para a nova regra.
-    for (final r in reminders) {
-      try {
-        if (r.done || !r.when.isAfter(DateTime.now())) {
-          await cancelReminder(r);
-        } else {
-          await scheduleReminder(r);
-        }
-      } catch (_) {
-        // O aplicativo continua abrindo, mesmo que Android negue alarmes.
-      }
-    }
     // Conversas ficam apenas no aparelho; imagens nunca são persistidas no chat.
     try {
       final stored = prefs.getString('chat_history');
@@ -280,8 +331,11 @@ class _MainScreenState extends State<MainScreen> {
       loaded = true;
     });
     scrollToLatest();
+    // Alarmes já registrados permanecem sob controle dos receivers Android.
+    // Não inicialize plugins nativos em segundo plano durante a abertura.
     checkUpdates(silent: true);
   }
+
   Future<void> save() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('reminders', jsonEncode(reminders.map((e)=>e.toJson()).toList()));
@@ -387,10 +441,15 @@ class _MainScreenState extends State<MainScreen> {
               const Text('Planos LembreAI',style:TextStyle(
                 fontSize:22,fontWeight:FontWeight.bold)),
               const SizedBox(height:8),
-              const Text('Você usa o plano gratuito. Os valores abaixo são '
-                'propostas; assinaturas e cobranças ainda não estão ativas.'),
+              if (personalBetaUnlimited)
+                const ListTile(leading: Icon(Icons.check_circle_outline),
+                  title: Text('Beta gratuita — lembretes ilimitados'),
+                  subtitle: Text('Sem mensalidade, créditos ou anúncios obrigatórios.'))
+              else
+                const Text('Você usa o plano gratuito. Os valores abaixo são '
+                  'propostas; assinaturas e cobranças ainda não estão ativas.'),
               const SizedBox(height:12),
-              for (final plan in plans)
+              if (!personalBetaUnlimited) for (final plan in plans)
                 Card(child: ListTile(
                   leading: Icon(plan.available
                     ? Icons.check_circle_outline : Icons.lock_outline),
@@ -399,7 +458,8 @@ class _MainScreenState extends State<MainScreen> {
                     ' lembretes ativos'+
                     (plan.available?' • disponível':' • em preparação')),
                 )),
-              const RewardedAdDemo(),
+              if (!personalBetaUnlimited) const RewardedAdDemo(),
+              if (!personalBetaUnlimited && consentTestAds) const TestAdBanner(),
               const SizedBox(height:8),
               const Text('Os avisos não são garantidos em situações de '
                 'bateria descarregada, falta de permissão ou restrições do Android.'),
@@ -415,7 +475,7 @@ class _MainScreenState extends State<MainScreen> {
 
   /// Verifica novas versoes sem interromper o cliente.
   Future<void> checkUpdates({bool silent=false}) async {
-    if (updateBusy) return;
+    if (!mounted || updateBusy) return;
     setState(() => updateBusy=true);
     try {
       final latest=await AppUpdateService.check();
@@ -464,6 +524,14 @@ class _MainScreenState extends State<MainScreen> {
           setState(()=>downloadProgress=value);
         }
       });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          duration: Duration(seconds: 8),
+          content: Text('O instalador do Android foi aberto. Confirme em '
+            '“Instalar” para concluir. Se aparecer “App não instalado”, '
+            'não desinstale antes de salvar seus lembretes.'),
+        ));
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -471,6 +539,26 @@ class _MainScreenState extends State<MainScreen> {
     } finally {
       if (mounted) setState(() => updateBusy=false);
     }
+  }
+
+  Future<void> checkAlarmPermissions() async {
+    String status;
+    try {
+      final android = alarms.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+      if (android == null) throw StateError('Serviço de alarmes indisponível.');
+      final notifications = await android.areNotificationsEnabled() == true ||
+          await android.requestNotificationsPermission() == true;
+      final exact = await android.canScheduleExactNotifications() == true ||
+          await android.requestExactAlarmsPermission() == true;
+      status = 'Notificações: ${notifications ? "permitidas" : "desativadas"}. '
+          'Alarmes exatos: ${exact ? "permitidos" : "desativados"}.';
+    } catch (error) {
+      status = alarmFailure(error);
+    }
+    if (mounted) await showDialog<void>(context: context, builder: (ctx) =>
+      AlertDialog(title: const Text('Permissões dos lembretes'), content: Text(status),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Fechar'))]));
   }
 
   Future<void> showPreferences() async {
@@ -484,12 +572,42 @@ class _MainScreenState extends State<MainScreen> {
         child: Column(mainAxisSize:MainAxisSize.min,children:[
           const Text('Privacidade e dados',style:TextStyle(
             fontSize:20,fontWeight:FontWeight.bold)),
+          ListTile(leading:const Icon(Icons.alarm),
+            title:const Text('Notificações e alarmes'),
+            onTap:() { Navigator.pop(sheetContext); checkAlarmPermissions(); }),
           ListTile(leading:const Icon(Icons.description_outlined),
             title:const Text('Termos de uso'),
             onTap:()=>showDocument('Termos de uso',appTerms)),
           ListTile(leading:const Icon(Icons.privacy_tip_outlined),
             title:const Text('Como seus dados são tratados'),
             onTap:()=>showDocument('Privacidade',privacySummary)),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            value: consentTestAds,
+            title: const Text('Mostrar anúncios de teste'),
+            subtitle: const Text('Demonstrações do Google, sem pagamento. '
+              'Anúncios reais dependem da aprovação da conta AdMob.'),
+            onChanged: (value) async {
+              final enabled = value == true;
+              setState(() => consentTestAds = enabled);
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setBool('show_test_ads', enabled);
+            },
+            controlAffinity: ListTileControlAffinity.leading,
+          ),
+          FutureBuilder<PackageInfo>(
+            future: appPackageInfo,
+            builder: (context, snapshot) {
+              final info = snapshot.data;
+              return ListTile(
+                leading: const Icon(Icons.info_outline),
+                title: const Text('Versão do aplicativo'),
+                subtitle: Text(info == null
+                  ? 'Consultando…'
+                  : '${info.version} (${info.buildNumber})'),
+              );
+            },
+          ),
           ListTile(leading:const Icon(Icons.delete_outline),
             title:const Text('Apagar histórico de conversa'),
             subtitle:const Text('Apaga apenas mensagens deste aparelho.'),
@@ -653,8 +771,9 @@ class _MainScreenState extends State<MainScreen> {
     persistMessages();
     try {
       final now=DateTime.now();
+      final relative = photo == null ? parseRelativeRequest(message, now) : null;
       AssistantResponse? online;
-      if (await authorizeOnlineAI()) {
+      if (relative == null && await authorizeOnlineAI()) {
         online=await AssistantService.ask(message,now,
           imageBase64:photo==null ? null : base64Encode(photo),
           imageMimeType:mime,
@@ -680,11 +799,11 @@ class _MainScreenState extends State<MainScreen> {
         bot(upcomingSummary());return;
       } else if (RegExp(r'^(oi|olá|ola|bom dia|boa tarde|boa noite|e aí|eai|tudo bem)[!?.\s]*$')
           .hasMatch(message.toLowerCase().trim())) {
-        bot('Oi! 💜 Podemos conversar normalmente. Também posso te ajudar '
-          'com agenda, provas e compromissos.');
+        bot('Oi! 💜 Sou sua assistente de agendamentos. Posso ajudar a criar, '
+          'consultar, alterar ou cancelar lembretes.');
         return;
       }
-      final local=online==null ? parseReminder(message,now) : null;
+      final local=online==null ? (relative ?? parseReminder(message,now)) : null;
       final suggestions=<SuggestedReminder>[
         if (online!=null && online.reminders.isNotEmpty) ...online.reminders,
         if (online!=null && online.reminders.isEmpty && online.reminder!=null) online.reminder!,
@@ -710,12 +829,8 @@ class _MainScreenState extends State<MainScreen> {
         bot('Esses compromissos já estão cadastrados ou não têm data futura válida.');
         return;
       }
-      final slots=freeActiveReminderLimit-reminders.where((r)=>!r.done).length;
-      if (unique.length>slots) {
-        bot('Encontrei '+unique.length.toString()+' compromissos, mas restam apenas '
-          +slots.toString()+' vagas no plano gratuito. Conclua lembretes antigos antes de importar.');
-        return;
-      }
+      final creditsNeeded=reminderCreditsNeeded(
+        reminders.where((r)=>!r.done).length, unique.length);
       if (photo!=null || unique.length>1) {
         final details=unique.map((r)=>'• '+r.title+'\n  '+formatted(r.when)+
           (r.location.isEmpty ? '' : '\n  Local: '+r.location)).join('\n\n');
@@ -734,11 +849,23 @@ class _MainScreenState extends State<MainScreen> {
       }
       setState(()=>reminders.addAll(added));
       await save();
+      if (creditsNeeded>0 && !await AccountService.consumeCredits(creditsNeeded)) {
+        setState(()=>reminders.removeWhere((r)=>added.any((a)=>a.id==r.id)));
+        await save();
+        bot('Encontrei '+unique.length.toString()+' compromissos, mas faltam créditos para '
+          'ultrapassar o limite de 10 lembretes ativos. Conclua lembretes antigos ou assista '
+          'a um anúncio premiado depois que a conta estiver configurada.');
+        return;
+      }
       final failures=<String>[];
+      var approximate = false;
       for (final r in added) {
         try {
-          await scheduleReminder(r,requestPermissions:true);
-        } catch (_) {failures.add(r.title);}
+          final exact = await scheduleReminder(r,requestPermissions:true);
+          if (!exact) approximate = true;
+        } catch (error) {
+          failures.add('${r.title} — ${alarmFailure(error)}');
+        }
       }
       final report=added.map((r)=>'• '+r.title+'\n  '+formatted(r.when)+
         (r.location.isEmpty ? '' : '\n  Local: '+r.location)+
@@ -747,9 +874,8 @@ class _MainScreenState extends State<MainScreen> {
       bot('✅ '+added.length.toString()+' compromisso(s) salvos na Agenda:\n\n'+report+
         (failures.isNotEmpty
           ? '\n\n⚠️ Falha ao programar os alarmes de: '+failures.join(', ')+
-            '. Confira as permissões do Android.'
-          : '\n\nPara os toques funcionarem, habilite notificações e alarmes precisos no Android.')+
-        (online?.reply.isNotEmpty==true ? '\n\n'+online!.reply : ''));
+            '.'
+          : approximate ? '\n\nAviso programado com horário aproximado pelo Android.' : '\n\nAviso programado.'));
     } catch (_) {
       bot('Não consegui concluir a solicitação. Confira a Agenda antes de tentar novamente.');
     } finally {
@@ -914,7 +1040,23 @@ class _MainScreenState extends State<MainScreen> {
       ))));
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('LembreAI'),
+      appBar: AppBar(title: FutureBuilder<PackageInfo>(
+        future: appPackageInfo,
+        builder: (context, snapshot) {
+          final info = snapshot.data;
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('LembreAI'),
+              Text(info == null
+                ? 'beta'
+                : 'v${info.version} • build ${info.buildNumber}',
+                style: Theme.of(context).textTheme.labelSmall),
+            ],
+          );
+        },
+      ),
         actions: [
           IconButton(onPressed: () => Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => const AccountScreen())),
@@ -928,7 +1070,7 @@ class _MainScreenState extends State<MainScreen> {
               : Icons.notification_important_outlined),
           ),
           IconButton(onPressed: showPlans,
-            tooltip: 'Planos e limites',
+            tooltip: personalBetaUnlimited ? 'Beta gratuita' : 'Planos e limites',
             icon: const Icon(Icons.workspace_premium_outlined)),
           IconButton(onPressed: showPreferences,
             tooltip: 'Privacidade e preferências',
@@ -971,7 +1113,6 @@ class _MainScreenState extends State<MainScreen> {
             );
           },
         )),
-        if(consentTestAds) const TestAdBanner(),
         SafeArea(child: Padding(padding: const EdgeInsets.all(8),
           child: Column(mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start, children: [

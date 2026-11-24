@@ -20,4 +20,19 @@ void main() {
   test('5 - mensagem sem data explícita', () {
     expect(parseReminder('me lembra de pagar amanhã', now), isNull);
   });
+  test('usa o instante da mensagem nos pedidos relativos', () {
+    final start = DateTime(2026, 11, 23, 23, 59, 42);
+    for (final entry in {
+      'me lembra de tomar água daqui um segundo': 1,
+      'me lembra de tomar água daqui a um minuto': 60,
+      'me avisa em meia hora de tomar água': 1800,
+      'me lembre de tomar água em 2 horas': 7200,
+    }.entries) {
+      final reminder = parseRelativeRequest(entry.key, start)!;
+      expect(reminder.when, start.add(Duration(seconds: entry.value)));
+      expect(reminder.title, 'tomar água');
+    }
+    expect(parseRelativeRequest('cancela o alarme em dois minutos', start), isNull);
+    expect(parseRelativeRequest('me lembra em dois dias e em três dias', start), isNull);
+  });
 }

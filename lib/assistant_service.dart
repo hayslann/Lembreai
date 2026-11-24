@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'account_service.dart';
 
 class SuggestedReminder {
   final String title;
@@ -79,10 +80,12 @@ class AssistantService {
     final endpoint = _endpoint('chat');
     if (endpoint == null) return null;
     try {
+      final idToken=await AccountService.validIdToken();
       final response = await http.post(endpoint,
         headers: {
           'Content-Type':'application/json',
-          if (devToken.isNotEmpty) 'Authorization':'Bearer $devToken',
+          if(idToken!=null) 'Authorization':'Bearer $idToken',
+          if (devToken.isNotEmpty) 'X-LembreAI-Dev-Token':devToken,
         },
         body:jsonEncode({
           'message':message,

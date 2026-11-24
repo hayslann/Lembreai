@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'account_service.dart';
+import 'plan_catalog.dart';
 import 'legal_text.dart';
 
 class AccountScreen extends StatefulWidget {
@@ -12,12 +13,14 @@ class _AccountScreenState extends State<AccountScreen> {
   final email=TextEditingController();
   final password=TextEditingController();
   String? signedIn;
+  int? creditBalance;
   bool busy=false;
   bool accepted=false;
   bool create=false;
   @override
-  void initState(){super.initState();AccountService.savedEmail().then((value){
-    if(mounted) setState(()=>signedIn=value);
+  void initState(){super.initState();AccountService.savedEmail().then((value) async {
+    final balance=value==null?null:await AccountService.availableCredits();
+    if(mounted) setState(() {signedIn=value;creditBalance=balance;});
   });}
   @override
   void dispose(){email.dispose();password.dispose();super.dispose();}
@@ -29,7 +32,8 @@ class _AccountScreenState extends State<AccountScreen> {
       final address=google
         ? await AccountService.signInGoogle()
         : await AccountService.signInEmail(email.text,password.text,create:create);
-      if(mounted) setState(()=>signedIn=address);
+      final balance=await AccountService.availableCredits();
+      if(mounted) setState(() {signedIn=address;creditBalance=balance;});
     } catch(e) {
       if(mounted) ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content:Text(AccountService.explain(e))));
@@ -46,19 +50,24 @@ class _AccountScreenState extends State<AccountScreen> {
         const SizedBox(height:10),
         if(signedIn!=null) ...[
           Text('Conectado como $signedIn',textAlign:TextAlign.center),
+          const SizedBox(height:8),
+          Text(personalBetaUnlimited ? 'Beta gratuita: lembretes ilimitados.' : creditBalance==null
+            ? 'Créditos extras: não foi possível consultar agora.'
+            : 'Créditos para lembretes extras: $creditBalance',
+            textAlign:TextAlign.center),
           const SizedBox(height:16),
           FilledButton.tonal(onPressed:busy?null:() async {
             await AccountService.signOut();
-            if(mounted)setState(()=>signedIn=null);
+            if(mounted)setState(() {signedIn=null;creditBalance=null;});
           },child:const Text('Sair da conta')),
         ] else if(!AccountService.enabled) ...[
-          const Text('O cadastro seguro com Google ou e-mail e senha '
-            'está em preparação. Por enquanto, os dados ficam somente '
+          const Text('O login ainda não está configurado para esta versão. '
+            'Por enquanto, os dados ficam somente '
             'neste celular, sem conta online ou sincronização.',
             textAlign:TextAlign.center),
           const SizedBox(height:16),
-          const Text('Para ativar, o desenvolvedor precisa configurar '
-            'Firebase Authentication e as credenciais de OAuth do Google.'),
+          const Text('A ativação depende da configuração do Firebase '
+            'Authentication e das credenciais de OAuth do Google.'),
         ] else ...[
           Text(create?'Criar conta':'Entrar',style:Theme.of(context)
             .textTheme.headlineSmall,textAlign:TextAlign.center),
