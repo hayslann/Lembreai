@@ -117,6 +117,7 @@ Future<bool> scheduleReminder(Reminder r, {bool requestPermissions = false}) asy
   await cancelReminder(r);
   final moments = calculateAlertMoments(
       r.when, r.advanceMinutes, DateTime.now());
+  if (moments.isEmpty) throw StateError('O horário passou antes de programar o aviso.');
   for (final moment in moments) {
     await alarms.zonedSchedule(
       r.id * 3 + moment.slot, '🔔 ' + r.title,
@@ -732,8 +733,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     persistMessages();
     try {
       final now=DateTime.now();
+      final relative = photo == null ? parseRelativeRequest(message, now) : null;
       AssistantResponse? online;
-      if (await authorizeOnlineAI()) {
+      if (relative == null && await authorizeOnlineAI()) {
         online=await AssistantService.ask(message,now,
           imageBase64:photo==null ? null : base64Encode(photo),
           imageMimeType:mime,
@@ -763,7 +765,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           'consultar, alterar ou cancelar lembretes.');
         return;
       }
-      final local=online==null ? parseReminder(message,now) : null;
+      final local=online==null ? (relative ?? parseReminder(message,now)) : null;
       final suggestions=<SuggestedReminder>[
         if (online!=null && online.reminders.isNotEmpty) ...online.reminders,
         if (online!=null && online.reminders.isEmpty && online.reminder!=null) online.reminder!,
@@ -831,9 +833,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       bot('✅ '+added.length.toString()+' compromisso(s) salvos na Agenda:\n\n'+report+
         (failures.isNotEmpty
           ? '\n\n⚠️ Falha ao programar os alarmes de: '+failures.join(', ')+
-            '. Confira as permissões do Android.'
-          : '\n\nPara os toques funcionarem, habilite notificações e alarmes precisos no Android.')+
-        (online?.reply.isNotEmpty==true ? '\n\n'+online!.reply : ''));
+            '.'
+          : '\n\nAviso programado.'));
     } catch (_) {
       bot('Não consegui concluir a solicitação. Confira a Agenda antes de tentar novamente.');
     } finally {

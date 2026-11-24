@@ -4,6 +4,38 @@ class ParsedReminder {
   const ParsedReminder(this.title, this.when);
 }
 
+// Resolve pedidos simples imediatamente, preservando o relógio da mensagem.
+ParsedReminder? parseRelativeRequest(String input, DateTime now) {
+  final command = RegExp(
+    r'^(?:me (?:lembra|lembre|avisa|avise)|lembre-me|crie (?:um )?lembrete)\s+(?:(?:de|para|pra)\s+)?(.+)$',
+    caseSensitive: false,
+  ).firstMatch(input.trim());
+  if (command == null) return null;
+  final body = command.group(1)!.replaceFirst(RegExp(r'[.!]+$'), '').trim();
+  final interval = RegExp(
+    r'\b(?:daqui\s+(?:a\s+)?|em\s+)(?:(meia\s+hora)|([1-9]\d{0,4}|um|uma|dois|duas|três|tres|cinco|dez|quinze|vinte|trinta)\s+(segundos?|minutos?|horas?|dias?))\b',
+    caseSensitive: false,
+  );
+  final matches = interval.allMatches(body).toList();
+  if (matches.length != 1) return null;
+  final match = matches.single;
+  if (match.start != 0 && match.end != body.length) return null;
+  final title = body.replaceRange(match.start, match.end, '').trim()
+      .replaceFirst(RegExp(r'^[,\s]*(?:(?:de|para|pra)\s+)?', caseSensitive: false), '')
+      .replaceFirst(RegExp(r'[,\s]+$'), '');
+  if (title.isEmpty || RegExp(r'[?;\n]|\b(?:amanhã|hoje|antes|depois|todo|toda|cada|horas?|minutos?|segundos?|dias?|cancelar|alterar|adiar)\b', caseSensitive: false).hasMatch(title)) return null;
+  const numbers = {'um':1, 'uma':1, 'dois':2, 'duas':2, 'três':3, 'tres':3,
+    'cinco':5, 'dez':10, 'quinze':15, 'vinte':20, 'trinta':30};
+  final amount = match.group(2)?.toLowerCase();
+  final n = amount == null ? 30 : int.tryParse(amount) ?? numbers[amount]!;
+  final unit = match.group(3)?.toLowerCase() ?? 'minutos';
+  final duration = unit.startsWith('segundo') ? Duration(seconds:n)
+      : unit.startsWith('minuto') ? Duration(minutes:n)
+      : unit.startsWith('hora') ? Duration(hours:n) : Duration(days:n);
+  if (duration > const Duration(days:3650)) return null;
+  return ParsedReminder(title, now.add(duration));
+}
+
 /// Interpretação determinística para lembretes simples em português.
 /// Não é uma IA generativa.
 ParsedReminder? parseReminder(String input, DateTime now) {
